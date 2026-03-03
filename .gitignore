@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+
+# Runtime
+.ahub/
+drive-token.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test
+coverage/
