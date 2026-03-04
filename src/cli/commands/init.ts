@@ -1,29 +1,47 @@
 /**
- * `ahub init` — Interactive setup for a storage backend.
+ * `ahub init` — Zero-config setup for a storage backend.
  *
- * Guides the user through choosing a provider (git / drive) and
- * configuring it.  Persists the result to ~/.ahub/config.json.
+ * Git:   auto-creates a GitHub repo via `gh` CLI (no manual setup).
+ * Drive: auto-creates a Google Drive folder via OAuth2 (no manual setup).
+ *
+ * The user just picks a provider — everything else is automatic.
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { simpleGit } from 'simple-git';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { saveConfig, loadConfig } from '../../core/config.js';
 import type { AhubConfig } from '../../core/types.js';
+
+const execFileAsync = promisify(execFile);
 
 export function createInitCommand(): Command {
   return new Command('init')
     .description('Initialise a storage backend (git or Google Drive)')
     .option('-p, --provider <provider>', 'Storage provider: git or drive')
-    .option('-r, --repo <url>', 'Git repository URL (only with --provider git)')
+    .option('-r, --repo <url>', 'Git repository URL (skip auto-creation)')
+    .option('-n, --name <name>', 'Repository/folder name (default: ahub-skills)')
     .option('-b, --branch <branch>', 'Git branch to sync (default: main)')
     .option('-d, --skills-dir <dir>', 'Sub-directory for skills (default: .)')
+    .option('--private', 'Create private repository (default)', true)
+    .option('--public', 'Create public repository')
     .option('-y, --yes', 'Skip confirmation prompts')
-    .action(async (opts: { provider?: string; repo?: string; branch?: string; skillsDir?: string; yes?: boolean }) => {
+    .action(async (opts: {
+      provider?: string;
+      repo?: string;
+      name?: string;
+      branch?: string;
+      skillsDir?: string;
+      private?: boolean;
+      public?: boolean;
+      yes?: boolean;
+    }) => {
       try {
         await runInit(opts);
       } catch (err) {
@@ -35,10 +53,25 @@ export function createInitCommand(): Command {
 }
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface InitOpts {
+  provider?: string;
+  repo?: string;
+  name?: string;
+  branch?: string;
+  skillsDir?: string;
+  private?: boolean;
+  public?: boolean;
+  yes?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runInit(opts: { provider?: string; repo?: string; branch?: string; skillsDir?: string; yes?: boolean }): Promise<void> {
+async function runInit(opts: InitOpts): Promise<void> {
   const existing = await loadConfig();
   if (existing && !opts.yes) {
     const { overwrite } = await inquirer.prompt<{ overwrite: boolean }>([
@@ -65,8 +98,8 @@ async function runInit(opts: { provider?: string; repo?: string; branch?: string
         name: 'provider',
         message: 'Choose a storage provider:',
         choices: [
-          { name: 'Git repository', value: 'git' },
-          { name: 'Google Drive', value: 'drive' },
+          { name: 'Git (GitHub) — requires gh CLI', value: 'git' },
+          { name: 'Google Drive — just a Google account', value: 'drive' },
         ],
       },
     ]);
@@ -74,9 +107,9 @@ async function runInit(opts: { provider?: string; repo?: string; branch?: string
   }
 
   if (provider === 'git') {
-    await initGit(opts.repo, opts.branch, opts.skillsDir);
+    await initGit(opts);
   } else if (provider === 'drive') {
-    await initDrive();
+    await initDrive(opts);
   } else {
     throw new Error(`Unknown provider "${provider}". Expected "git" or "drive".`);
   }
@@ -94,58 +127,139 @@ async function dirExists(p: string): Promise<boolean> {
   }
 }
 
+/** Run a shell command and return stdout, or null on failure. */
+async function exec(cmd: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(cmd, args, { timeout: 30_000 });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Git flow
+// Git flow — auto-create GitHub repo
 // ---------------------------------------------------------------------------
 
-async function initGit(repoUrlArg?: string, branchArg?: string, skillsDirArg?: string): Promise<void> {
+async function initGit(opts: InitOpts): Promise<void> {
   let repoUrl: string;
-  if (!repoUrlArg) {
-    const answer = await inquirer.prompt<{ repoUrl: string }>([
-      {
-        type: 'input',
-        name: 'repoUrl',
-        message: 'Git repository URL (HTTPS or SSH):',
-        validate: (input: string) =>
-          input.trim().length > 0 || 'Repository URL is required.',
-      },
-    ]);
-    repoUrl = answer.repoUrl.trim();
+  const branch = opts.branch ?? 'main';
+  const skillsDir = opts.skillsDir ?? '.';
+
+  if (opts.repo) {
+    // User explicitly provided a repo URL — skip auto-creation.
+    repoUrl = opts.repo;
+    console.log(chalk.dim(`Using existing repo: ${repoUrl}`));
   } else {
-    repoUrl = repoUrlArg;
+    // Auto-create a GitHub repo via gh CLI.
+    repoUrl = await autoCreateGitHubRepo(opts);
   }
 
-  let branch: string;
-  if (branchArg) {
-    branch = branchArg;
-  } else {
-    const answer = await inquirer.prompt<{ branch: string }>([
-      {
-        type: 'input',
-        name: 'branch',
-        message: 'Branch to sync:',
-        default: 'main',
-      },
-    ]);
-    branch = answer.branch;
+  // Clone & bootstrap.
+  await cloneAndBootstrap(repoUrl, branch);
+
+  const config: AhubConfig = {
+    provider: 'git',
+    git: { repoUrl, branch, skillsDir },
+  };
+
+  await saveConfig(config);
+  printSuccess();
+}
+
+/**
+ * Auto-create a GitHub repository using the `gh` CLI.
+ * Returns the HTTPS clone URL of the newly created repo.
+ */
+async function autoCreateGitHubRepo(opts: InitOpts): Promise<string> {
+  // 1. Check gh is installed.
+  const ghVersion = await exec('gh', ['--version']);
+  if (!ghVersion) {
+    console.log('');
+    console.log(chalk.red('GitHub CLI (gh) is not installed.'));
+    console.log('');
+    console.log('Install it:');
+    console.log(`  ${chalk.cyan('https://cli.github.com/')}`);
+    console.log('');
+    console.log('Or use Google Drive instead:');
+    console.log(`  ${chalk.cyan('ahub init --provider drive')}`);
+    console.log('');
+    throw new Error('gh CLI not found. Install it or use --provider drive.');
   }
 
-  let skillsDir: string;
-  if (skillsDirArg) {
-    skillsDir = skillsDirArg;
-  } else {
-    const answer = await inquirer.prompt<{ skillsDir: string }>([
-      {
-        type: 'input',
-        name: 'skillsDir',
-        message: 'Sub-directory for skills (. for repo root):',
-        default: '.',
-      },
-    ]);
-    skillsDir = answer.skillsDir;
+  // 2. Check gh is authenticated.
+  const authStatus = await exec('gh', ['auth', 'status']);
+  if (!authStatus) {
+    console.log('');
+    console.log(chalk.yellow('GitHub CLI is not authenticated.'));
+    console.log('');
+    console.log('Run this first:');
+    console.log(`  ${chalk.cyan('gh auth login')}`);
+    console.log('');
+    throw new Error('gh CLI not authenticated. Run "gh auth login" first.');
   }
 
-  // Derive local clone path.
+  // 3. Get GitHub username for display.
+  const ghUser = await exec('gh', ['api', 'user', '--jq', '.login']);
+  const username = ghUser ?? 'user';
+
+  // 4. Determine repo name.
+  let repoName: string;
+  if (opts.name) {
+    repoName = opts.name;
+  } else if (opts.yes) {
+    repoName = 'ahub-skills';
+  } else {
+    const answer = await inquirer.prompt<{ repoName: string }>([
+      {
+        type: 'input',
+        name: 'repoName',
+        message: 'Repository name:',
+        default: 'ahub-skills',
+      },
+    ]);
+    repoName = answer.repoName.trim();
+  }
+
+  const visibility = opts.public ? 'public' : 'private';
+  const fullName = `${username}/${repoName}`;
+
+  // 5. Check if repo already exists.
+  const existing = await exec('gh', ['repo', 'view', fullName, '--json', 'url', '--jq', '.url']);
+  if (existing) {
+    console.log(chalk.dim(`Repository ${fullName} already exists, using it.`));
+    return existing.endsWith('.git') ? existing : `${existing}.git`;
+  }
+
+  // 6. Create the repo.
+  console.log(chalk.dim(`Creating ${visibility} repository ${fullName} on GitHub...`));
+
+  const createResult = await exec('gh', [
+    'repo', 'create', repoName,
+    `--${visibility}`,
+    '--description', 'Skills managed by agent-hub',
+    '--clone=false',
+  ]);
+
+  if (!createResult) {
+    throw new Error(`Failed to create GitHub repository "${repoName}".`);
+  }
+
+  // 7. Get the clone URL.
+  const cloneUrl = await exec('gh', ['repo', 'view', fullName, '--json', 'url', '--jq', '.url']);
+  if (!cloneUrl) {
+    throw new Error(`Repository created but could not retrieve URL for "${fullName}".`);
+  }
+
+  console.log(chalk.green(`✔ Created ${cloneUrl}`));
+  return cloneUrl.endsWith('.git') ? cloneUrl : `${cloneUrl}.git`;
+}
+
+// ---------------------------------------------------------------------------
+// Clone & bootstrap (shared logic)
+// ---------------------------------------------------------------------------
+
+async function cloneAndBootstrap(repoUrl: string, branch: string): Promise<void> {
   const repoName = repoUrl
     .replace(/\.git\/?$/, '')
     .split(/[/:]/)
@@ -153,7 +267,7 @@ async function initGit(repoUrlArg?: string, branchArg?: string, skillsDirArg?: s
     .at(-1) ?? 'repo';
   const localDir = path.join(os.homedir(), '.ahub', 'repos', repoName);
 
-  // Clean up previous clone if it exists.
+  // Clean up previous clone.
   if (await dirExists(localDir)) {
     await rm(localDir, { recursive: true, force: true });
   }
@@ -163,41 +277,32 @@ async function initGit(repoUrlArg?: string, branchArg?: string, skillsDirArg?: s
 
   const git = simpleGit();
 
-  // Try cloning with the requested branch first.
-  // If the repo is empty (no branches), fall back to a plain clone
-  // and create the branch locally.
   try {
-    await git.clone(repoUrl, localDir, [
-      '--branch',
-      branch,
-      '--single-branch',
-    ]);
+    await git.clone(repoUrl, localDir, ['--branch', branch, '--single-branch']);
   } catch {
-    // Clean up failed clone attempt.
+    // Clean up failed clone.
     if (await dirExists(localDir)) {
       await rm(localDir, { recursive: true, force: true });
     }
 
-    // Plain clone (works for empty repos and repos whose default branch
-    // differs from the requested one).
     console.log(chalk.dim('Branch not found, cloning default branch...'));
     await git.clone(repoUrl, localDir);
 
     const localGit = simpleGit(localDir);
 
-    // If the repo is completely empty, create an initial commit so the
-    // branch can exist.
+    // Empty repo → create initial commit.
     const log = await localGit.log().catch(() => null);
     if (!log || log.total === 0) {
       console.log(chalk.dim('Empty repository — creating initial commit...'));
-      const readmePath = path.join(localDir, 'README.md');
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(readmePath, '# agent-hub store\n\nSkills managed by agent-hub.\n');
+      await writeFile(
+        path.join(localDir, 'README.md'),
+        '# agent-hub store\n\nSkills managed by [agent-hub](https://github.com/Beowulfwar/agenthub).\n',
+      );
       await localGit.add('.');
       await localGit.commit('Initial commit');
     }
 
-    // Ensure the requested branch exists.
+    // Ensure requested branch exists.
     const branches = await localGit.branchLocal();
     if (!branches.all.includes(branch)) {
       await localGit.checkoutLocalBranch(branch);
@@ -205,84 +310,54 @@ async function initGit(repoUrlArg?: string, branchArg?: string, skillsDirArg?: s
       await localGit.checkout(branch);
     }
 
-    // Push the branch to the remote so future pulls work.
+    // Push so future pulls work.
     try {
       await localGit.push('origin', branch, ['--set-upstream']);
     } catch {
-      // Push may fail for local bare repos without a matching branch —
-      // that's ok, we'll push on the first `ahub push`.
+      // OK — we'll push on first `ahub push`.
     }
   }
+}
 
+// ---------------------------------------------------------------------------
+// Google Drive flow — zero-config with OAuth2
+// ---------------------------------------------------------------------------
+
+async function initDrive(opts: InitOpts): Promise<void> {
+  const folderName = opts.name ?? 'ahub-skills';
+
+  console.log('');
+  console.log(chalk.bold('Google Drive setup'));
+  console.log(chalk.dim('A folder will be created automatically in your Drive.'));
+  console.log(chalk.dim('You will be asked to sign in with your Google account.'));
+  console.log('');
+
+  // The actual OAuth flow + folder creation happens lazily on first use
+  // via DriveProvider.ensureClient(). We just save the config here.
   const config: AhubConfig = {
-    provider: 'git',
-    git: {
-      repoUrl,
-      branch,
-      skillsDir,
+    provider: 'drive',
+    drive: {
+      folderId: folderName,
     },
   };
 
   await saveConfig(config);
 
+  console.log(chalk.green(`✔ Configuration saved (folder: "${folderName}")`));
+  console.log(chalk.dim('  OAuth sign-in will happen on first use (ahub list, ahub push, etc.)'));
+  printSuccess();
+}
+
+// ---------------------------------------------------------------------------
+// Shared output
+// ---------------------------------------------------------------------------
+
+function printSuccess(): void {
   console.log('');
-  console.log(chalk.green('✔ Configuration saved to ~/.ahub/config.json'));
+  console.log(chalk.green('✔ agent-hub is ready!'));
   console.log('');
   console.log(chalk.bold('Next steps:'));
   console.log(`  ${chalk.cyan('ahub list')}            List available skills`);
   console.log(`  ${chalk.cyan('ahub push <path>')}     Push a local skill`);
   console.log(`  ${chalk.cyan('ahub deploy <name>')}   Deploy a skill to your IDE`);
-}
-
-// ---------------------------------------------------------------------------
-// Google Drive flow
-// ---------------------------------------------------------------------------
-
-async function initDrive(): Promise<void> {
-  console.log(chalk.yellow('Google Drive provider setup'));
-  console.log('');
-  console.log(
-    'You need a GCP project with the Drive API enabled and OAuth2 credentials.',
-  );
-  console.log(
-    'Follow: https://developers.google.com/drive/api/quickstart/nodejs',
-  );
-  console.log('');
-
-  const { credentialsPath } = await inquirer.prompt<{ credentialsPath: string }>([
-    {
-      type: 'input',
-      name: 'credentialsPath',
-      message: 'Path to GCP credentials JSON (leave blank to skip for now):',
-      default: '',
-    },
-  ]);
-
-  const { folderId } = await inquirer.prompt<{ folderId: string }>([
-    {
-      type: 'input',
-      name: 'folderId',
-      message:
-        'Drive folder ID (leave blank to create "ahub-store" folder on first use):',
-      default: '',
-    },
-  ]);
-
-  const config: AhubConfig = {
-    provider: 'drive',
-    drive: {
-      folderId: folderId || 'ahub-store',
-      ...(credentialsPath ? { credentialsPath } : {}),
-    },
-  };
-
-  await saveConfig(config);
-
-  console.log('');
-  console.log(chalk.green('✔ Configuration saved to ~/.ahub/config.json'));
-  console.log('');
-  console.log(chalk.bold('Next steps:'));
-  console.log(
-    `  ${chalk.cyan('ahub list')}   List skills`,
-  );
 }

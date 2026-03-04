@@ -63,7 +63,9 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
 export class DriveProvider implements StorageProvider {
   readonly name = 'drive' as const;
 
-  private readonly folderId: string;
+  /** May be a real Drive folder ID or a folder name (auto-resolved). */
+  private resolvedFolderId: string | null = null;
+  private readonly configFolderId: string;
   private readonly clientId: string;
   private readonly clientSecret: string;
 
@@ -71,10 +73,59 @@ export class DriveProvider implements StorageProvider {
   private auth: OAuth2Client | null = null;
 
   constructor(config: DriveConfig) {
-    this.folderId = config.folderId;
-    // credentialsPath is accepted but we also support inline client id/secret.
+    this.configFolderId = config.folderId;
     this.clientId = DEFAULT_CLIENT_ID;
     this.clientSecret = DEFAULT_CLIENT_SECRET;
+  }
+
+  /**
+   * Resolve the folder ID.  If the config value looks like a name
+   * (no uppercase hex chars), search My Drive root for a matching folder
+   * and create one if it doesn't exist yet.
+   */
+  private async ensureFolderId(): Promise<string> {
+    if (this.resolvedFolderId) return this.resolvedFolderId;
+
+    const id = this.configFolderId;
+
+    // Real Drive IDs are long alphanumeric strings.  Simple names like
+    // "ahub-skills" are clearly not IDs.
+    const looksLikeId = /^[A-Za-z0-9_-]{20,}$/.test(id);
+
+    if (looksLikeId) {
+      this.resolvedFolderId = id;
+      return id;
+    }
+
+    // It's a folder name — find or create it in My Drive root.
+    const drive = await this.ensureClient();
+    const q = `name='${id}' and mimeType='${FOLDER_MIME}' and 'root' in parents and trashed=false`;
+
+    const res = await drive.files.list({
+      q,
+      fields: 'files(id, name)',
+      pageSize: 1,
+    });
+
+    const files = res.data.files ?? [];
+    if (files.length > 0) {
+      this.resolvedFolderId = files[0].id as string;
+      console.log(`  Using existing Drive folder "${id}" (${this.resolvedFolderId})`);
+      return this.resolvedFolderId;
+    }
+
+    // Create the folder.
+    const created = await drive.files.create({
+      requestBody: {
+        name: id,
+        mimeType: FOLDER_MIME,
+      },
+      fields: 'id',
+    });
+
+    this.resolvedFolderId = created.data.id as string;
+    console.log(`  Created Drive folder "${id}" (${this.resolvedFolderId})`);
+    return this.resolvedFolderId;
   }
 
   // ── lazy SDK initialisation ────────────────────────────────────────────
@@ -363,9 +414,10 @@ export class DriveProvider implements StorageProvider {
 
   async list(query?: string): Promise<string[]> {
     const drive = await this.ensureClient();
+    const parentId = await this.ensureFolderId();
 
     const q =
-      `'${this.folderId}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
+      `'${parentId}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
 
     const names: string[] = [];
     let pageToken: string | undefined;
@@ -396,12 +448,14 @@ export class DriveProvider implements StorageProvider {
   }
 
   async exists(name: string): Promise<boolean> {
-    const id = await this.findFolder(name, this.folderId);
+    const parentId = await this.ensureFolderId();
+    const id = await this.findFolder(name, parentId);
     return id !== null;
   }
 
   async get(name: string): Promise<SkillPackage> {
-    const folderId = await this.findFolder(name, this.folderId);
+    const parentId = await this.ensureFolderId();
+    const folderId = await this.findFolder(name, parentId);
     if (!folderId) {
       throw new SkillNotFoundError(name);
     }
@@ -428,11 +482,12 @@ export class DriveProvider implements StorageProvider {
 
   async put(pkg: SkillPackage): Promise<void> {
     const skillName = pkg.skill.name;
+    const parentId = await this.ensureFolderId();
 
     // Find or create the skill folder.
-    let skillFolderId = await this.findFolder(skillName, this.folderId);
+    let skillFolderId = await this.findFolder(skillName, parentId);
     if (!skillFolderId) {
-      skillFolderId = await this.createFolder(skillName, this.folderId);
+      skillFolderId = await this.createFolder(skillName, parentId);
     }
 
     // Upload every file, creating sub-folders as needed.
@@ -464,7 +519,8 @@ export class DriveProvider implements StorageProvider {
   }
 
   async delete(name: string): Promise<void> {
-    const folderId = await this.findFolder(name, this.folderId);
+    const parentId = await this.ensureFolderId();
+    const folderId = await this.findFolder(name, parentId);
     if (!folderId) {
       throw new SkillNotFoundError(name);
     }
