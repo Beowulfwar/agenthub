@@ -13,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { DeployTarget, SkillPackage } from '../core/types.js';
 import type { Deployer } from './deployer.js';
+import { assertSafeSkillName } from '../core/sanitize.js';
 
 export class ClaudeCodeDeployer implements Deployer {
   readonly target: DeployTarget = 'claude-code';
@@ -28,6 +29,7 @@ export class ClaudeCodeDeployer implements Deployer {
   }
 
   async deploy(pkg: SkillPackage): Promise<string> {
+    assertSafeSkillName(pkg.skill.name);
     await mkdir(this.basePath, { recursive: true });
 
     const fileName = `${pkg.skill.name}.md`;

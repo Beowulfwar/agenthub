@@ -32,14 +32,14 @@ async function runSearch(query: string): Promise<void> {
   const provider = createProvider(config);
 
   const spinner = ora(`Searching for "${query}"...`).start();
-  const matches = await provider.list(query);
+  const allNames = await provider.list();
+  const matches = allNames.filter((n) => n.toLowerCase().includes(query.toLowerCase()));
   spinner.stop();
 
   if (matches.length === 0) {
     console.log(chalk.yellow(`No skills matching "${query}".`));
 
-    // Suggest similar names by doing a broader search.
-    const allNames = await provider.list();
+    // Suggest similar names from the already-fetched full list.
     const suggestions = allNames
       .filter((n) => levenshteinClose(n, query))
       .slice(0, 5);

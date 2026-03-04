@@ -12,18 +12,9 @@
 
 import { mkdir, writeFile, rm, access } from 'node:fs/promises';
 import path from 'node:path';
-import matter from 'gray-matter';
 import type { DeployTarget, SkillPackage } from '../core/types.js';
 import type { Deployer } from './deployer.js';
-
-/**
- * Strip YAML frontmatter from raw Markdown.
- * If no frontmatter is detected, the input is returned as-is.
- */
-function stripFrontmatter(raw: string): string {
-  const { content } = matter(raw);
-  return content.trim();
-}
+import { assertSafeSkillName } from '../core/sanitize.js';
 
 export class CursorDeployer implements Deployer {
   readonly target: DeployTarget = 'cursor';
@@ -39,6 +30,7 @@ export class CursorDeployer implements Deployer {
   }
 
   async deploy(pkg: SkillPackage): Promise<string> {
+    assertSafeSkillName(pkg.skill.name);
     await mkdir(this.basePath, { recursive: true });
 
     const fileName = `${pkg.skill.name}.md`;

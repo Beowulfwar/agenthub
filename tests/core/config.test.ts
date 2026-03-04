@@ -179,17 +179,32 @@ describe('setConfigValue', () => {
     expect(parsed.git.branch).toBe('develop');
   });
 
-  it('creates intermediate objects for new paths', async () => {
-    // No config exists - loadConfig returns null so setConfigValue starts with empty object
+  it('throws when no config exists', async () => {
     const enoent = new Error('ENOENT') as NodeJS.ErrnoException;
     enoent.code = 'ENOENT';
     mockReadFile.mockRejectedValue(enoent);
 
-    await setConfigValue('deploy.claude.path', '/custom/path');
+    await expect(setConfigValue('deploy.claude.path', '/custom/path'))
+      .rejects.toThrow('No configuration found');
+  });
+
+  it('creates intermediate objects for new paths on existing config', async () => {
+    const existing = { provider: 'git', git: { repoUrl: 'url', branch: 'main', skillsDir: '.' } };
+    mockReadFile.mockResolvedValue(JSON.stringify(existing));
+
+    await setConfigValue('deployTargets.claude-code', '/custom/path');
 
     expect(mockWriteFile).toHaveBeenCalledTimes(1);
     const writtenContent = mockWriteFile.mock.calls[0]![1] as string;
     const parsed = JSON.parse(writtenContent);
-    expect(parsed.deploy.claude.path).toBe('/custom/path');
+    expect(parsed.deployTargets['claude-code']).toBe('/custom/path');
+  });
+
+  it('rejects mutations that invalidate provider', async () => {
+    const existing = { provider: 'git', git: { repoUrl: 'url', branch: 'main', skillsDir: '.' } };
+    mockReadFile.mockResolvedValue(JSON.stringify(existing));
+
+    await expect(setConfigValue('provider', 'invalid'))
+      .rejects.toThrow('Invalid config: provider must be "git" or "drive"');
   });
 });

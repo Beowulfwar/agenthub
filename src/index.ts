@@ -20,7 +20,6 @@ export type {
   GitConfig,
   DriveConfig,
   AhubConfig,
-  SyncResult,
   HealthCheckResult,
 } from './core/types.js';
 

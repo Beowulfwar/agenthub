@@ -7,8 +7,8 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { requireConfig } from '../../core/config.js';
 import { createProvider } from '../../storage/factory.js';
-import { loadSkillPackage } from '../../core/skill.js';
-import { SkillValidationError } from '../../core/errors.js';
+import { loadSkillPackage, validateSkill } from '../../core/skill.js';
+import { assertSafePackage } from '../../core/sanitize.js';
 
 export function createPushCommand(): Command {
   return new Command('push')
@@ -35,16 +35,9 @@ async function runPush(dirPath: string): Promise<void> {
   const pkg = await loadSkillPackage(dirPath);
   spinner.succeed(`Loaded "${pkg.skill.name}"`);
 
-  // Basic validation.
-  const violations: string[] = [];
-  if (!pkg.skill.name) violations.push('Skill name is required.');
-  if (!pkg.skill.description) violations.push('Skill description is required.');
-  if (!pkg.files.some((f) => f.relativePath === 'SKILL.md')) {
-    violations.push('Package must include a SKILL.md file.');
-  }
-  if (violations.length > 0) {
-    throw new SkillValidationError(violations);
-  }
+  // Validate skill fields and path safety (C3/C4/I5).
+  validateSkill(pkg.skill);
+  assertSafePackage(pkg);
 
   // Push to remote.
   const config = await requireConfig();

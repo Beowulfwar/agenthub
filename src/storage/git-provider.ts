@@ -25,6 +25,7 @@ import {
   loadSkillPackage,
   saveSkillPackage,
 } from '../core/skill.js';
+import { assertSafeSkillName } from '../core/sanitize.js';
 import type { StorageProvider } from './provider.js';
 
 // ---------------------------------------------------------------------------
@@ -147,8 +148,12 @@ export class GitProvider implements StorageProvider {
     if (now - this.lastPullMs > maxAgeMs) {
       try {
         await git.pull('origin', this.branch);
-      } catch {
-        // Pull may fail on repos with no remote tracking branch yet — ignore.
+      } catch (err) {
+        // Warn but don't fail — stale data is better than crashing.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('no tracking information') && !msg.includes('couldn\'t find remote ref')) {
+          console.warn(`Warning: git pull failed (${msg}). Using cached data.`);
+        }
       }
       this.lastPullMs = Date.now();
     }
@@ -216,6 +221,7 @@ export class GitProvider implements StorageProvider {
   }
 
   async get(name: string): Promise<SkillPackage> {
+    assertSafeSkillName(name);
     await this.pullIfStale();
 
     const dir = this.skillDir(name);
@@ -227,12 +233,17 @@ export class GitProvider implements StorageProvider {
   }
 
   async put(pkg: SkillPackage): Promise<void> {
+    assertSafeSkillName(pkg.skill.name);
     const git = await this.pullIfStale();
     const dir = this.skillDir(pkg.skill.name);
 
     await saveSkillPackage(dir, pkg);
 
     await git.add(dir);
+    const status = await git.status();
+    if (status.files.length === 0) {
+      return; // nothing changed
+    }
     await git.commit(`Update skill: ${pkg.skill.name}`);
     try {
       await git.push('origin', this.branch);
@@ -243,6 +254,7 @@ export class GitProvider implements StorageProvider {
   }
 
   async delete(name: string): Promise<void> {
+    assertSafeSkillName(name);
     const git = await this.pullIfStale();
     const dir = this.skillDir(name);
 
@@ -251,9 +263,14 @@ export class GitProvider implements StorageProvider {
     }
 
     await rm(dir, { recursive: true, force: true });
-    await git.add(dir);
+    await git.add(['-A', dir]);
     await git.commit(`Remove skill: ${name}`);
-    await git.push('origin', this.branch);
+    try {
+      await git.push('origin', this.branch);
+    } catch {
+      // First push — set upstream.
+      await git.push('origin', this.branch, ['--set-upstream']);
+    }
   }
 
   async *exportAll(): AsyncIterable<SkillPackage> {

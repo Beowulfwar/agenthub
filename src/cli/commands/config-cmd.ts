@@ -85,15 +85,7 @@ async function runConfigGet(key?: string): Promise<void> {
 }
 
 async function runConfigSet(key: string, value: string): Promise<void> {
-  // Attempt to parse as JSON for booleans / numbers / objects.
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    parsed = value; // Keep as plain string.
-  }
+  await setConfigValue(key, value);
 
-  await setConfigValue(key, parsed);
-
-  console.log(chalk.green(`Set ${chalk.bold(key)} = ${JSON.stringify(parsed)}`));
+  console.log(chalk.green(`Set ${chalk.bold(key)} = ${JSON.stringify(value)}`));
 }

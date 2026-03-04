@@ -25,7 +25,6 @@
     "inquirer": "^9.0.0",
     "ora": "^8.0.0",
     "simple-git": "^3.25.0",
-    "yaml": "^2.4.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

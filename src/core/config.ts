@@ -47,11 +47,12 @@ export async function loadConfig(): Promise<AhubConfig | null> {
     const raw = await readFile(CONFIG_PATH, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
 
-    // Basic shape guard -- at minimum the provider field must be present.
+    // Basic shape guard -- provider must be a known value.
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
-      'provider' in parsed
+      'provider' in parsed &&
+      ((parsed as Record<string, unknown>).provider === 'git' || (parsed as Record<string, unknown>).provider === 'drive')
     ) {
       return parsed as AhubConfig;
     }
@@ -146,9 +147,12 @@ export async function getConfigValue(key: string): Promise<unknown> {
  * Intermediate objects are created as needed.
  */
 export async function setConfigValue(key: string, value: unknown): Promise<void> {
-  const cfg = (await loadConfig()) ?? ({} as Record<string, unknown>);
+  const cfg = await loadConfig();
+  if (!cfg) {
+    throw new Error('No configuration found. Run "ahub init" first.');
+  }
   const parts = key.split('.');
-  let current: Record<string, unknown> = cfg as Record<string, unknown>;
+  let current: Record<string, unknown> = cfg as unknown as Record<string, unknown>;
 
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]!;
@@ -160,6 +164,12 @@ export async function setConfigValue(key: string, value: unknown): Promise<void>
 
   const lastKey = parts[parts.length - 1]!;
   current[lastKey] = value;
+
+  // Validate the mutated config still has required fields.
+  const mutated = cfg as unknown as Record<string, unknown>;
+  if (mutated.provider !== 'git' && mutated.provider !== 'drive') {
+    throw new Error(`Invalid config: provider must be "git" or "drive", got "${String(mutated.provider)}".`);
+  }
 
   await saveConfig(cfg as unknown as AhubConfig);
 }

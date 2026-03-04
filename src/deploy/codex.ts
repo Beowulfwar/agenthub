@@ -17,6 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { DeployTarget, SkillPackage } from '../core/types.js';
 import type { Deployer } from './deployer.js';
+import { assertSafeRelativePath, assertSafeSkillName } from '../core/sanitize.js';
 
 export class CodexDeployer implements Deployer {
   readonly target: DeployTarget = 'codex';
@@ -32,6 +33,7 @@ export class CodexDeployer implements Deployer {
   }
 
   async deploy(pkg: SkillPackage): Promise<string> {
+    assertSafeSkillName(pkg.skill.name);
     const skillDir = path.join(this.basePath, pkg.skill.name);
 
     // Remove existing directory to ensure a clean deploy.
@@ -46,6 +48,7 @@ export class CodexDeployer implements Deployer {
 
     // Write every file in the package.
     for (const file of pkg.files) {
+      assertSafeRelativePath(file.relativePath);
       const filePath = path.join(skillDir, file.relativePath);
       await mkdir(path.dirname(filePath), { recursive: true });
       await writeFile(filePath, file.content, 'utf-8');

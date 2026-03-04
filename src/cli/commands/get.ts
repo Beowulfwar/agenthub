@@ -7,12 +7,9 @@ import chalk from 'chalk';
 import ora from 'ora';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdir, writeFile } from 'node:fs/promises';
 import { requireConfig } from '../../core/config.js';
 import { createProvider } from '../../storage/factory.js';
-
-/** Directory where fetched skills are cached locally. */
-const CACHE_DIR = path.join(os.homedir(), '.ahub', 'cache');
+import { CacheManager } from '../../core/cache.js';
 
 export function createGetCommand(): Command {
   return new Command('get')
@@ -41,15 +38,9 @@ async function runGet(name: string): Promise<void> {
   const pkg = await provider.get(name);
   spinner.succeed(`Fetched "${name}"`);
 
-  // Cache every file to disk.
-  const cacheDir = path.join(CACHE_DIR, pkg.skill.name);
-  await mkdir(cacheDir, { recursive: true });
-
-  for (const file of pkg.files) {
-    const filePath = path.join(cacheDir, file.relativePath);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, file.content, 'utf-8');
-  }
+  // Cache every file to disk via CacheManager.
+  const cache = new CacheManager();
+  await cache.cacheSkill(pkg);
 
   // Print the SKILL.md body.
   console.log('');
@@ -60,5 +51,5 @@ async function runGet(name: string): Promise<void> {
   console.log('');
   console.log(pkg.skill.body);
   console.log('');
-  console.log(chalk.dim(`Cached at: ${cacheDir}`));
+  console.log(chalk.dim(`Cached at: ${path.join(os.homedir(), '.ahub', 'cache', pkg.skill.name)}`));
 }

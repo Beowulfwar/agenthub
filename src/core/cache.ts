@@ -21,6 +21,7 @@ import path from 'node:path';
 import { AHUB_DIR } from './config.js';
 import type { SkillFile, SkillPackage } from './types.js';
 import { parseSkill } from './skill.js';
+import { assertSafeRelativePath, assertSafeSkillName } from './sanitize.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -129,6 +130,8 @@ export class CacheManager {
    * @param pkg - The skill package to cache.
    */
   async cacheSkill(pkg: SkillPackage): Promise<void> {
+    assertSafeSkillName(pkg.skill.name);
+
     const name = pkg.skill.name;
     const skillDir = path.join(CACHE_DIR, name);
 
@@ -138,6 +141,7 @@ export class CacheManager {
 
     // Write every file in the package.
     for (const file of pkg.files) {
+      assertSafeRelativePath(file.relativePath);
       const target = path.join(skillDir, file.relativePath);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, file.content, 'utf-8');

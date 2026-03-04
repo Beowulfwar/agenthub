@@ -57,6 +57,15 @@ const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Escape a string for use inside single-quoted Drive API query values. */
+function driveEscape(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// ---------------------------------------------------------------------------
 // DriveProvider
 // ---------------------------------------------------------------------------
 
@@ -66,16 +75,18 @@ export class DriveProvider implements StorageProvider {
   /** May be a real Drive folder ID or a folder name (auto-resolved). */
   private resolvedFolderId: string | null = null;
   private readonly configFolderId: string;
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+  private readonly credentialsPath?: string;
+  private clientId: string;
+  private clientSecret: string;
 
   private drive: DriveV3 | null = null;
   private auth: OAuth2Client | null = null;
 
   constructor(config: DriveConfig) {
     this.configFolderId = config.folderId;
-    this.clientId = DEFAULT_CLIENT_ID;
-    this.clientSecret = DEFAULT_CLIENT_SECRET;
+    this.credentialsPath = config.credentialsPath;
+    this.clientId = process.env.AHUB_GOOGLE_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+    this.clientSecret = process.env.AHUB_GOOGLE_CLIENT_SECRET ?? DEFAULT_CLIENT_SECRET;
   }
 
   /**
@@ -99,7 +110,7 @@ export class DriveProvider implements StorageProvider {
 
     // It's a folder name — find or create it in My Drive root.
     const drive = await this.ensureClient();
-    const q = `name='${id}' and mimeType='${FOLDER_MIME}' and 'root' in parents and trashed=false`;
+    const q = `name='${driveEscape(id)}' and mimeType='${FOLDER_MIME}' and 'root' in parents and trashed=false`;
 
     const res = await drive.files.list({
       q,
@@ -135,6 +146,34 @@ export class DriveProvider implements StorageProvider {
    */
   private async ensureClient(): Promise<DriveV3> {
     if (this.drive) return this.drive;
+
+    if (this.clientId === DEFAULT_CLIENT_ID) {
+      // If a credentials file was provided, try to read client ID/secret from it.
+      if (this.credentialsPath) {
+        try {
+          const raw = await readFile(this.credentialsPath, 'utf-8');
+          const creds = JSON.parse(raw);
+          const installed = creds.installed ?? creds.web ?? creds;
+          if (installed.client_id) this.clientId = installed.client_id;
+          if (installed.client_secret) this.clientSecret = installed.client_secret;
+        } catch (err) {
+          throw new AuthenticationError(
+            `Failed to read credentials from "${this.credentialsPath}": ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+
+      // After attempting to load from file, check if we still have placeholders.
+      if (this.clientId === DEFAULT_CLIENT_ID) {
+        throw new AuthenticationError(
+          'Google Drive credentials not configured.\n\n' +
+          'Set environment variables:\n' +
+          '  export AHUB_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"\n' +
+          '  export AHUB_GOOGLE_CLIENT_SECRET="your-client-secret"\n\n' +
+          'Or provide a credentials file path during "ahub init --provider drive".'
+        );
+      }
+    }
 
     const { google } = await import('googleapis');
 
@@ -197,6 +236,9 @@ export class DriveProvider implements StorageProvider {
 
     await mkdir(path.dirname(TOKEN_PATH), { recursive: true });
     await writeFile(TOKEN_PATH, JSON.stringify(tokens, null, 2), 'utf-8');
+    // Restrict permissions to owner only.
+    const { chmod } = await import('node:fs/promises');
+    await chmod(TOKEN_PATH, 0o600);
   }
 
   /**
@@ -272,7 +314,7 @@ export class DriveProvider implements StorageProvider {
     parentId: string,
   ): Promise<string | null> {
     const drive = await this.ensureClient();
-    const q = `'${parentId}' in parents and name='${name}' and mimeType='${FOLDER_MIME}' and trashed=false`;
+    const q = `'${driveEscape(parentId)}' in parents and name='${driveEscape(name)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
 
     const res = await drive.files.list({
       q,
@@ -316,7 +358,7 @@ export class DriveProvider implements StorageProvider {
     const drive = await this.ensureClient();
 
     // Check if file already exists.
-    const q = `'${parentId}' in parents and name='${name}' and trashed=false`;
+    const q = `'${driveEscape(parentId)}' in parents and name='${driveEscape(name)}' and trashed=false`;
     const existing = await drive.files.list({
       q,
       fields: 'files(id)',
@@ -374,7 +416,7 @@ export class DriveProvider implements StorageProvider {
 
     do {
       const res = await drive.files.list({
-        q: `'${folderId}' in parents and trashed=false`,
+        q: `'${driveEscape(folderId)}' in parents and trashed=false`,
         fields: 'nextPageToken, files(id, name, mimeType)',
         pageSize: 100,
         pageToken,
@@ -417,7 +459,7 @@ export class DriveProvider implements StorageProvider {
     const parentId = await this.ensureFolderId();
 
     const q =
-      `'${parentId}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
+      `'${driveEscape(parentId)}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
 
     const names: string[] = [];
     let pageToken: string | undefined;

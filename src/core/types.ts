@@ -87,16 +87,6 @@ export interface AhubConfig {
 // Operation results
 // ---------------------------------------------------------------------------
 
-/** Summary returned after a sync (pull/push) operation. */
-export interface SyncResult {
-  /** Number of skills added locally. */
-  added: number;
-  /** Number of skills updated locally. */
-  updated: number;
-  /** Number of skills deleted locally. */
-  deleted: number;
-}
-
 /** Result of a provider health check. */
 export interface HealthCheckResult {
   /** Whether the provider is reachable and configured correctly. */

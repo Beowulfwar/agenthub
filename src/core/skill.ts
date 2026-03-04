@@ -23,6 +23,7 @@ import path from 'node:path';
 
 import type { Skill, SkillFile, SkillMetadata, SkillPackage } from './types.js';
 import { SkillNotFoundError, SkillValidationError } from './errors.js';
+import { assertSafeRelativePath, assertSafeSkillName } from './sanitize.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -137,6 +138,11 @@ export async function loadSkillPackage(dirPath: string): Promise<SkillPackage> {
 
   const skill = parseSkill(raw);
 
+  // Validate skill name for path safety (don't crash on unnamed skills during load).
+  if (skill.name) {
+    assertSafeSkillName(skill.name);
+  }
+
   // Start the files array with SKILL.md itself.
   const files: SkillFile[] = [
     { relativePath: SKILL_FILENAME, content: raw },
@@ -168,6 +174,7 @@ export async function saveSkillPackage(
   await mkdir(dirPath, { recursive: true });
 
   for (const file of pkg.files) {
+    assertSafeRelativePath(file.relativePath);
     const target = path.join(dirPath, file.relativePath);
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, file.content, 'utf-8');

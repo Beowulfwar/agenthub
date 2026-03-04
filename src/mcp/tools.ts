@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { loadConfig } from '../core/config.js';
 import { createProvider } from '../storage/factory.js';
 import { parseSkill, serializeSkill, validateSkill } from '../core/skill.js';
+import { assertSafeSkillName } from '../core/sanitize.js';
 import { createDeployer } from '../deploy/deployer.js';
 import type { StorageProvider } from '../storage/provider.js';
 import type { AhubConfig, DeployTarget } from '../core/types.js';
@@ -130,7 +131,9 @@ export function registerTools(server: McpServer): void {
       try {
         const provider = await getProvider();
         const pkg = await provider.get(name);
-        const deployer = await createDeployer(target as DeployTarget);
+        const config = await loadConfig();
+        const customPath = config?.deployTargets?.[target as DeployTarget];
+        const deployer = await createDeployer(target as DeployTarget, customPath);
         const deployedPath = await deployer.deploy(pkg);
 
         return {
@@ -161,6 +164,7 @@ export function registerTools(server: McpServer): void {
     },
     async ({ name, description, body }) => {
       try {
+        assertSafeSkillName(name);
         const provider = await getProvider();
         const skill = { name, description, body, metadata: {} };
         validateSkill(skill);
