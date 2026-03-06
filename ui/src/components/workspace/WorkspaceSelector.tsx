@@ -71,11 +71,14 @@ export function WorkspaceSelector() {
               {entries.map((entry) => {
                 const name = entry.manifest?.name ?? basename(dirname(entry.filePath));
                 return (
-                  <button
+                  <div
                     key={entry.filePath}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleSwitch(entry.filePath)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSwitch(entry.filePath)}
                     className={cn(
-                      'group flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors',
+                      'group flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors',
                       entry.isActive ? 'bg-brand-50' : 'hover:bg-gray-50',
                     )}
                   >
@@ -108,7 +111,7 @@ export function WorkspaceSelector() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
-                  </button>
+                  </div>
                 );
               })}
             </div>
