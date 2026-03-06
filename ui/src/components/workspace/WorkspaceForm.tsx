@@ -3,14 +3,33 @@ import { Save, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSaveWorkspace } from '../../hooks/useWorkspace';
 import { TargetSelector } from '../deploy/TargetSelector';
-import type { WorkspaceManifest, WorkspaceSkillEntry, DeployTarget } from '../../api/types';
+import type {
+  DeployTarget,
+  DeployTargetDirectory,
+  WorkspaceManifest,
+  WorkspaceSkillEntry,
+} from '../../api/types';
 
 interface WorkspaceFormProps {
   manifest: WorkspaceManifest;
   filePath: string;
+  workspaceDir: string;
+  targetDirectories: DeployTargetDirectory[];
 }
 
-export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
+const SOURCE_LABELS: Record<DeployTargetDirectory['source'], string> = {
+  'workspace-local': 'Project convention',
+  'config-override': 'Global override',
+  'tool-default': 'Tool default',
+};
+
+export function WorkspaceForm({
+  manifest,
+  filePath,
+  workspaceDir,
+  targetDirectories,
+}: WorkspaceFormProps) {
+  const resolvedTargetDirectories = targetDirectories ?? [];
   const [name, setName] = useState(manifest.name ?? '');
   const [description, setDescription] = useState(manifest.description ?? '');
   const [defaultTargets, setDefaultTargets] = useState<DeployTarget[]>(manifest.defaultTargets ?? ['claude-code']);
@@ -41,8 +60,8 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
     saveMutation.mutate(
       { filePath, manifest: updated },
       {
-        onSuccess: () => toast.success('Workspace manifest saved'),
-        onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not save the manifest'),
+        onSuccess: () => toast.success('Workspace profile saved'),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not save the workspace profile'),
       },
     );
   }, [name, description, defaultTargets, skills, manifest.groups, manifest.profile, filePath, saveMutation]);
@@ -89,25 +108,32 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-gray-700">Workspace Manifest</h3>
+        <h3 className="text-sm font-semibold text-gray-700">Project Sync Profile</h3>
         <p className="mt-1 text-sm text-gray-500">
-          These fields edit the{' '}
+          Agent Hub stores this project's sync profile in the{' '}
           <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
             ahub.workspace.json
           </code>{' '}
-          file for the selected working directory.
+          file. This file is not the cloud storage itself. It only describes which skills should
+          be available in this project and which agents should receive them.
         </p>
-        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Manifest path</p>
-          <p className="mt-1 break-all font-mono text-xs text-gray-700">{filePath}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Project folder</p>
+            <p className="mt-1 break-all font-mono text-xs text-gray-700">{workspaceDir}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Workspace file</p>
+            <p className="mt-1 break-all font-mono text-xs text-gray-700">{filePath}</p>
+          </div>
         </div>
 
         <div className="mt-4">
-          <h4 className="text-sm font-semibold text-gray-700">Manifest settings</h4>
+          <h4 className="text-sm font-semibold text-gray-700">Project details</h4>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <label className="block text-sm font-medium text-gray-700">Project name</label>
             <input
               type="text"
               value={name}
@@ -117,31 +143,88 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Description</label>
+            <label className="block text-sm font-medium text-gray-700">Project description</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Skills for my project"
+              placeholder="Skills and prompts used in this project"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
         </div>
 
+        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700">Recognized agent folders</h4>
+              <p className="mt-1 text-sm text-gray-500">
+                Sync uses these directories so Codex, Claude Code and Cursor can read the files
+                directly in this project or through a global override.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {resolvedTargetDirectories.map((directory) => (
+              <div key={directory.target} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-gray-800">{directory.label}</span>
+                  <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                    {SOURCE_LABELS[directory.source]}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  {directory.exists ? 'Folder found on disk' : 'Folder will be created on first sync'}
+                </p>
+                <div className="mt-3 space-y-2 text-xs text-gray-600">
+                  <div>
+                    <p className="font-medium text-gray-700">Root</p>
+                    <p className="break-all font-mono text-[11px] text-gray-500">{directory.rootPath}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-700">Skill folder</p>
+                    <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.skill}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-700">Prompt folder</p>
+                    <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.prompt}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-700">Subagent folder</p>
+                    <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.subagent}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {resolvedTargetDirectories.length === 0 && (
+              <div className="rounded-lg border border-dashed border-gray-200 bg-white p-4 text-sm text-gray-500 sm:col-span-3">
+                Agent Hub will show the recognized folders for this project after the workspace
+                data is fully loaded.
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="mt-4">
-          <TargetSelector selected={defaultTargets} onChange={setDefaultTargets} />
+          <TargetSelector
+            selected={defaultTargets}
+            onChange={setDefaultTargets}
+            label="Agents to sync for this project"
+            description="Choose which agent environments should receive this project's skills by default."
+          />
         </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-700">
-            Manifest Skills ({skills.length})
+            Skills for this project ({skills.length})
           </h3>
-          <span className="text-xs text-gray-400">Ctrl+S to save manifest</span>
+          <span className="text-xs text-gray-400">Ctrl+S to save the workspace profile</span>
         </div>
         <p className="mt-1 text-sm text-gray-500">
-          This list defines which skills belong to the selected workspace manifest.
+          List the skills that should be downloaded and synced for this project. A new project can
+          start empty and receive skills later.
         </p>
 
         {skills.length > 0 && (
@@ -174,7 +257,7 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
                                 : 'border border-cyan-300 bg-cyan-50 text-cyan-700'
                             : 'border border-gray-200 bg-white text-gray-400'
                         }`}
-                        title={isDefault ? `Inherited from defaults` : `Toggle ${t}`}
+                        title={isDefault ? 'Inherited from project defaults' : `Toggle ${t}`}
                       >
                         {t === 'claude-code' ? 'CC' : t === 'codex' ? 'CX' : 'CR'}
                       </button>
@@ -193,7 +276,6 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
           </div>
         )}
 
-        {/* Add skill row */}
         <div className="mt-3 flex gap-2">
           <input
             type="text"
@@ -221,7 +303,7 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
             Groups ({manifest.groups.length})
           </h3>
           <p className="mt-1 text-xs text-gray-400">
-            Groups are preserved on save. Use the Raw JSON editor to modify groups.
+            Groups are preserved on save. Use the Raw JSON editor to modify grouped sync rules.
           </p>
           <div className="mt-3 divide-y divide-gray-100">
             {manifest.groups.map((group, i) => (
@@ -249,7 +331,7 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
           className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           <Save className="h-4 w-4" />
-          {saveMutation.isPending ? 'Saving...' : 'Save Manifest'}
+          {saveMutation.isPending ? 'Saving...' : 'Save workspace profile'}
         </button>
       </div>
     </div>

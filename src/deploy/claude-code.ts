@@ -38,10 +38,19 @@ export class ClaudeCodeDeployer implements Deployer {
     this.defaultRoot = path.join(os.homedir(), '.claude');
   }
 
+  private usesExactSubdir(): boolean {
+    if (!this.customPath) return false;
+    return Object.values(TYPE_SUBDIRS).includes(path.basename(this.customPath) as ContentType);
+  }
+
   /** Resolve the deploy directory based on content type. */
   private resolveDir(type?: ContentType): string {
-    if (this.customPath) return this.customPath;
     const subdir = TYPE_SUBDIRS[type ?? 'skill'];
+    if (this.customPath) {
+      return this.usesExactSubdir()
+        ? this.customPath
+        : path.join(this.customPath, subdir);
+    }
     return path.join(this.defaultRoot, subdir);
   }
 
@@ -62,7 +71,10 @@ export class ClaudeCodeDeployer implements Deployer {
   async undeploy(name: string): Promise<void> {
     // Check all type subdirectories since we don't know the type.
     for (const subdir of Object.values(TYPE_SUBDIRS)) {
-      const filePath = path.join(this.customPath ?? path.join(this.defaultRoot, subdir), `${name}.md`);
+      const baseDir = this.customPath
+        ? (this.usesExactSubdir() ? this.customPath : path.join(this.customPath, subdir))
+        : path.join(this.defaultRoot, subdir);
+      const filePath = path.join(baseDir, `${name}.md`);
       try {
         await access(filePath);
         await rm(filePath);

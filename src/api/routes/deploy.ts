@@ -2,8 +2,10 @@
  * Deploy routes — POST /api/deploy
  */
 
+import path from 'node:path';
 import { Hono } from 'hono';
-import { requireConfig } from '../../core/config.js';
+import { getWorkspaceRegistry, requireConfig, resolveDeployTargetRoot } from '../../core/config.js';
+import { findWorkspaceManifest } from '../../core/workspace.js';
 import { createProvider } from '../../storage/factory.js';
 import { createDeployer } from '../../deploy/deployer.js';
 import type { DeployTarget, SyncDeployedEntry, SyncFailedEntry } from '../../core/types.js';
@@ -43,6 +45,9 @@ export function deployRoutes(): Hono {
 
     const config = await requireConfig();
     const provider = createProvider(config);
+    const registry = await getWorkspaceRegistry();
+    const manifestPath = registry.active ?? await findWorkspaceManifest();
+    const workspaceDir = manifestPath ? path.dirname(manifestPath) : process.cwd();
 
     const deployed: SyncDeployedEntry[] = [];
     const failed: SyncFailedEntry[] = [];
@@ -61,8 +66,8 @@ export function deployRoutes(): Hono {
 
       for (const target of body.targets) {
         try {
-          const customPath = config.deployTargets?.[target];
-          const deployer = await createDeployer(target, customPath);
+          const deployRoot = resolveDeployTargetRoot(target, config, workspaceDir);
+          const deployer = await createDeployer(target, deployRoot);
           const deployedPath = await deployer.deploy(pkg);
           deployed.push({ skill: skillName, target, path: deployedPath });
         } catch (err) {

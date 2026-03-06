@@ -163,16 +163,32 @@ export interface ResolvedSkill {
   targets: DeployTarget[];
 }
 
+export interface DeployTargetDirectory {
+  target: DeployTarget;
+  label: string;
+  source: 'workspace-local' | 'config-override' | 'tool-default';
+  rootPath: string;
+  exists: boolean;
+  directories: {
+    skill: string;
+    prompt: string;
+    subagent: string;
+  };
+}
+
 export interface WorkspaceData {
   manifest: WorkspaceManifest | null;
   filePath: string | null;
+  workspaceDir: string | null;
   resolved: ResolvedSkill[];
+  targetDirectories: DeployTargetDirectory[];
   error?: string;
 }
 
 /** Summary of a registered workspace for listing. */
 export interface WorkspaceRegistryEntry {
   filePath: string;
+  workspaceDir: string;
   manifest: WorkspaceManifest | null;
   isActive: boolean;
   skillCount: number;

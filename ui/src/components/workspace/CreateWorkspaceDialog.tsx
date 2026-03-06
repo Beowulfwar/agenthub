@@ -26,8 +26,8 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
 
     toast.info(
       detected.length > 0
-        ? 'Directory selected. Review the folder and confirm if you want to use it as a workspace.'
-        : 'Directory selected. Confirm the folder or switch to create a new workspace manifest.',
+        ? 'Project folder selected. Review it and confirm to register this workspace.'
+        : 'Project folder selected. Confirm it or create a new workspace file for this project.',
     );
   };
 
@@ -69,8 +69,8 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
       onSuccess: ({ created }) => {
         toast.success(
           created
-            ? 'Workspace manifest created for the selected folder'
-            : 'Workspace loaded from the selected folder',
+            ? 'Workspace file created for this project'
+            : 'Project workspace added',
         );
         onClose();
       },
@@ -85,13 +85,13 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
       <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Choose Workspace Folder</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Add Project Workspace</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Pick the project folder first. Then Agent Hub will load the nearest{' '}
+              Pick a project folder. Agent Hub will reuse the existing{' '}
               <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
                 ahub.workspace.json
               </code>{' '}
-              or create one in that folder.
+              when it exists, or create one so this project can keep its own sync profile.
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -122,7 +122,7 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
             )}
           >
             <FolderOpen className="h-4 w-4" />
-            Use existing
+            Use project
           </button>
           <button
             onClick={() => setMode('create')}
@@ -134,7 +134,7 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
             )}
           >
             <FolderPlus className="h-4 w-4" />
-            Create new
+            Create profile
           </button>
         </div>
 
@@ -171,15 +171,15 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
                 </div>
                 <p className="mt-1 text-xs text-gray-400">
                   {mode === 'register'
-                    ? 'Choose the project folder that already has a workspace manifest. You can also paste the full path to ahub.workspace.json.'
-                    : 'Choose the project folder that should become your workspace. If a manifest already exists, it will be reused.'}
+                    ? 'Choose the project folder that already has a workspace file. You can also paste the full path to ahub.workspace.json.'
+                    : 'Choose the project folder to register. If a workspace file already exists there, Agent Hub will reuse it.'}
                 </p>
               </div>
 
               {mode === 'create' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Workspace name <span className="text-gray-400">(optional)</span>
+                    Project name <span className="text-gray-400">(optional)</span>
                   </label>
                   <input
                     type="text"
@@ -219,7 +219,7 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
                   ) : (
                     <FolderPlus className="h-4 w-4" />
                   )}
-                  {mode === 'register' ? 'Load workspace' : 'Use this folder'}
+                  {mode === 'register' ? 'Register project' : 'Create workspace profile'}
                 </button>
               </div>
             </div>

@@ -5,10 +5,12 @@
  * (claude-code, codex, cursor).
  */
 
+import path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { requireConfig } from '../../core/config.js';
+import { requireConfig, resolveDeployTargetRoot } from '../../core/config.js';
+import { findWorkspaceManifest } from '../../core/workspace.js';
 import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { createDeployer } from '../../deploy/deployer.js';
 import type { ContentType, DeployTarget } from '../../core/types.js';
@@ -67,6 +69,8 @@ async function runDeploy(
   }
 
   const config = await requireConfig();
+  const manifestPath = await findWorkspaceManifest();
+  const workspaceDir = manifestPath ? path.dirname(manifestPath) : process.cwd();
 
   let provider;
   if (opts.source && config.version === 2 && config.sources) {
@@ -80,8 +84,8 @@ async function runDeploy(
   const typeFilter = opts.type as ContentType | undefined;
 
   for (const target of targets) {
-    const customPath = config.deployTargets?.[target];
-    const deployer = await createDeployer(target, customPath);
+    const deployRoot = resolveDeployTargetRoot(target, config, workspaceDir);
+    const deployer = await createDeployer(target, deployRoot);
 
     if (opts.all) {
       await deployAll(provider, deployer, target, typeFilter);

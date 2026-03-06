@@ -28,13 +28,13 @@ export function WorkspaceSelector() {
   const activeEntry = entries?.find((e) => e.isActive);
 
   const displayName = activeEntry?.manifest?.name
-    ?? (activeEntry?.filePath
-      ? basename(dirname(activeEntry.filePath))
+    ?? (activeEntry?.workspaceDir
+      ? basename(activeEntry.workspaceDir)
       : 'No workspace');
 
   const handleSwitch = (filePath: string) => {
     setActive.mutate(filePath, {
-      onSuccess: () => toast.success('Working folder switched'),
+      onSuccess: () => toast.success('Active project changed'),
       onError: (err) => toast.error(err instanceof Error ? err.message : 'Switch failed'),
     });
     setOpen(false);
@@ -43,7 +43,7 @@ export function WorkspaceSelector() {
   const handleUnregister = (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
     unregister.mutate(filePath, {
-      onSuccess: () => toast.success('Workspace removed'),
+      onSuccess: () => toast.success('Project workspace removed'),
       onError: (err) => toast.error(err instanceof Error ? err.message : 'Remove failed'),
     });
   };
@@ -69,7 +69,7 @@ export function WorkspaceSelector() {
           {entries && entries.length > 0 ? (
             <div className="max-h-64 overflow-auto">
               {entries.map((entry) => {
-                const name = entry.manifest?.name ?? basename(dirname(entry.filePath));
+                const name = entry.manifest?.name ?? basename(entry.workspaceDir);
                 return (
                   <div
                     key={entry.filePath}
@@ -99,7 +99,7 @@ export function WorkspaceSelector() {
                           </span>
                         )}
                       </div>
-                      <p className="truncate font-mono text-xs text-gray-400">{entry.filePath}</p>
+                      <p className="truncate font-mono text-xs text-gray-400">{entry.workspaceDir}</p>
                       {!entry.error && (
                         <p className="text-xs text-gray-500">{entry.skillCount} skill{entry.skillCount !== 1 ? 's' : ''}</p>
                       )}
@@ -117,7 +117,7 @@ export function WorkspaceSelector() {
             </div>
           ) : (
             <div className="px-4 py-3 text-center text-sm text-gray-500">
-              No workspaces registered
+              No project workspaces registered
             </div>
           )}
 
@@ -130,7 +130,7 @@ export function WorkspaceSelector() {
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
               <Plus className="h-4 w-4" />
-              Choose Workspace Folder...
+              Add Project Workspace...
             </button>
           </div>
         </div>
@@ -145,10 +145,4 @@ export function WorkspaceSelector() {
 function basename(p: string): string {
   const parts = p.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] ?? p;
-}
-
-function dirname(p: string): string {
-  const normalized = p.replace(/\\/g, '/');
-  const idx = normalized.lastIndexOf('/');
-  return idx >= 0 ? normalized.slice(0, idx) : p;
 }

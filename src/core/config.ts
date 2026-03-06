@@ -10,7 +10,13 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { AhubConfig, DeployTarget, SourceConfig } from './types.js';
+import type {
+  AhubConfig,
+  ContentType,
+  DeployTarget,
+  DeployTargetDirectory,
+  SourceConfig,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Well-known paths
@@ -159,6 +165,139 @@ export function getDefaultDeployPaths(): Record<DeployTarget, string> {
     codex: path.join(home, '.codex', 'skills'),
     cursor: path.join(home, '.cursor', 'rules'),
   };
+}
+
+const TARGET_ROOT_NAMES: Record<DeployTarget, string> = {
+  'claude-code': '.claude',
+  codex: '.codex',
+  cursor: '.cursor',
+};
+
+const TARGET_LABELS: Record<DeployTarget, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+};
+
+const TARGET_TYPE_DIRS: Record<DeployTarget, Record<ContentType, string>> = {
+  'claude-code': {
+    skill: 'commands',
+    prompt: 'prompts',
+    subagent: 'agents',
+  },
+  codex: {
+    skill: 'skills',
+    prompt: 'prompts',
+    subagent: 'agents',
+  },
+  cursor: {
+    skill: 'rules',
+    prompt: 'prompts',
+    subagent: 'agents',
+  },
+};
+
+const ALL_DEPLOY_TARGETS: DeployTarget[] = ['claude-code', 'codex', 'cursor'];
+
+function getToolDefaultRoot(target: DeployTarget): string {
+  const home = os.homedir();
+  switch (target) {
+    case 'claude-code':
+      return path.join(home, '.claude');
+    case 'codex':
+      return path.join(home, '.codex');
+    case 'cursor':
+      return path.join(process.cwd(), '.cursor');
+  }
+}
+
+function buildTypeDirectories(
+  target: DeployTarget,
+  rootPath: string,
+): Record<ContentType, string> {
+  const subdirs = TARGET_TYPE_DIRS[target];
+  return {
+    skill: path.join(rootPath, subdirs.skill),
+    prompt: path.join(rootPath, subdirs.prompt),
+    subagent: path.join(rootPath, subdirs.subagent),
+  };
+}
+
+/**
+ * Return the conventional per-project agent roots inside a workspace.
+ */
+export function getWorkspaceDeployRoots(
+  workspaceDir: string,
+): Record<DeployTarget, string> {
+  const baseDir = path.resolve(workspaceDir);
+  return {
+    'claude-code': path.join(baseDir, TARGET_ROOT_NAMES['claude-code']),
+    codex: path.join(baseDir, TARGET_ROOT_NAMES.codex),
+    cursor: path.join(baseDir, TARGET_ROOT_NAMES.cursor),
+  };
+}
+
+/**
+ * Resolve the root path used for a deploy target.
+ *
+ * Precedence:
+ * 1. Explicit config override (`config.deployTargets[target]`)
+ * 2. Workspace-local conventional root (when `workspaceDir` is provided)
+ * 3. Tool default root
+ */
+export function resolveDeployTargetRoot(
+  target: DeployTarget,
+  config?: AhubConfig | null,
+  workspaceDir?: string,
+): string {
+  const override = config?.deployTargets?.[target];
+  if (override) {
+    return path.resolve(override);
+  }
+
+  if (workspaceDir) {
+    return getWorkspaceDeployRoots(workspaceDir)[target];
+  }
+
+  return getToolDefaultRoot(target);
+}
+
+/**
+ * Inspect the directories that Agent Hub would use for each supported target.
+ */
+export async function inspectDeployTargets(
+  config?: AhubConfig | null,
+  workspaceDir?: string,
+): Promise<DeployTargetDirectory[]> {
+  const results: DeployTargetDirectory[] = [];
+
+  for (const target of ALL_DEPLOY_TARGETS) {
+    const rootPath = resolveDeployTargetRoot(target, config, workspaceDir);
+    const source = config?.deployTargets?.[target]
+      ? 'config-override'
+      : workspaceDir
+        ? 'workspace-local'
+        : 'tool-default';
+
+    let exists = false;
+    try {
+      await access(rootPath);
+      exists = true;
+    } catch {
+      exists = false;
+    }
+
+    results.push({
+      target,
+      label: TARGET_LABELS[target],
+      source,
+      rootPath,
+      exists,
+      directories: buildTypeDirectories(target, rootPath),
+    });
+  }
+
+  return results;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ export function ManifestEditor({ manifest, filePath }: ManifestEditorProps) {
 
   const handleSave = () => {
     if (!filePath) {
-      toast.error('No manifest file path');
+      toast.error('No workspace file path');
       return;
     }
 
@@ -31,7 +31,7 @@ export function ManifestEditor({ manifest, filePath }: ManifestEditorProps) {
       saveMutation.mutate(
         { filePath, manifest: parsed },
         {
-          onSuccess: () => toast.success('Manifest saved'),
+          onSuccess: () => toast.success('Workspace file saved'),
           onError: (err) =>
             toast.error(err instanceof Error ? err.message : 'Save failed'),
         },
@@ -44,7 +44,7 @@ export function ManifestEditor({ manifest, filePath }: ManifestEditorProps) {
   if (!manifest) {
     return (
       <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-        No workspace manifest found. Create an <code className="font-mono text-brand-600">ahub.workspace.json</code>{' '}
+        No workspace file found. Create an <code className="font-mono text-brand-600">ahub.workspace.json</code>{' '}
         in your project root or run <code className="font-mono text-brand-600">ahub workspace init</code>.
       </div>
     );
@@ -54,7 +54,7 @@ export function ManifestEditor({ manifest, filePath }: ManifestEditorProps) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium text-gray-700">Manifest</h3>
+          <h3 className="text-sm font-medium text-gray-700">Workspace File</h3>
           {filePath && (
             <p className="text-xs text-gray-400 font-mono">{filePath}</p>
           )}

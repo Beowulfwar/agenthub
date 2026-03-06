@@ -7,6 +7,7 @@
  * target(s) declared in the manifest.
  */
 
+import path from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -73,6 +74,7 @@ async function runSync(opts: {
     force: opts.force,
     dryRun: opts.dryRun,
     filter,
+    workspaceDir: path.dirname(filePath),
     onProgress: (event: SyncProgressEvent) => {
       if (event.phase === 'fetch') {
         spinner.text = `[${event.current}/${event.total}] Fetching "${event.skill}"…`;

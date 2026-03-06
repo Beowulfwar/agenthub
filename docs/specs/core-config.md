@@ -4,7 +4,7 @@
 
 ## Proposito
 
-Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.json`. Fornece leitura, escrita, navegacao por dot-path e valores padrao de deploy para cada target suportado. E a base de configuracao consumida por cache, sync, CLI e MCP.
+Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.json`. Fornece leitura, escrita, navegacao por dot-path, valores padrao de deploy para cada target suportado e resolucao de diretorios por workspace/agente. E a base de configuracao consumida por cache, sync, CLI e MCP.
 
 ## Localizacao
 
@@ -27,6 +27,8 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 11. `setConfigValue()` cria objetos intermediarios automaticamente para dot-paths profundos.
 12. `getConfigValue()` retorna `undefined` quando nao ha config ou o caminho nao existe.
 13. `getDefaultDeployPaths()` e sincrono e sempre retorna os 3 targets mapeados.
+14. `resolveDeployTargetRoot()` respeita a precedencia: override global -> raiz local do workspace -> padrao nativo da ferramenta.
+15. `inspectDeployTargets()` sempre retorna os 3 targets suportados com paths resolvidos por tipo (`skill`, `prompt`, `subagent`).
 
 ## Comportamentos (Given/When/Then)
 
@@ -90,6 +92,18 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 - **When**: `getDefaultDeployPaths()` e chamado.
 - **Then**: Retorna `{ "claude-code": "~/.claude/commands/", "codex": "~/.codex/skills/", "cursor": "~/.cursor/rules/" }` (com paths absolutos usando `os.homedir()`).
 
+### Cenario: Resolver raiz local por workspace
+
+- **Given**: `workspaceDir === '/repos/app-a'` e nao existe override em `config.deployTargets.codex`
+- **When**: `resolveDeployTargetRoot('codex', config, workspaceDir)` e chamado
+- **Then**: Retorna `'/repos/app-a/.codex'`
+
+### Cenario: Override global tem precedencia sobre workspace
+
+- **Given**: `config.deployTargets.cursor === '/custom/cursor'` e `workspaceDir === '/repos/app-a'`
+- **When**: `resolveDeployTargetRoot('cursor', config, workspaceDir)` e chamado
+- **Then**: Retorna `'/custom/cursor'`
+
 ## Contratos de Interface
 
 ### Funcoes Publicas
@@ -102,6 +116,9 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 | `getConfigValue(key)` | `string` (dot-path) | `Promise<unknown>` | — |
 | `setConfigValue(key, value)` | `string`, `unknown` | `Promise<void>` | `Error` se config ausente ou provider invalido |
 | `getDefaultDeployPaths()` | — | `Record<DeployTarget, string>` | — |
+| `getWorkspaceDeployRoots(workspaceDir)` | `string` | `Record<DeployTarget, string>` | — |
+| `resolveDeployTargetRoot(target, config?, workspaceDir?)` | `DeployTarget`, `AhubConfig?`, `string?` | `string` | — |
+| `inspectDeployTargets(config?, workspaceDir?)` | `AhubConfig?`, `string?` | `Promise<DeployTargetDirectory[]>` | Erros de I/O |
 | `ensureAhubDir()` | — | `Promise<void>` | Erros de I/O |
 
 ### Constantes Exportadas
@@ -115,6 +132,7 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 
 - `AhubConfig` (de `./types.js`) — shape do config.json
 - `DeployTarget` (de `./types.js`) — `'claude-code' | 'codex' | 'cursor'`
+- `DeployTargetDirectory` (de `./types.js`) — diretorios resolvidos por target
 
 ## Dependencias
 
@@ -139,6 +157,7 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 | `ensureAhubDir()` | Cria `~/.ahub/` no filesystem |
 | `saveConfig()` | Cria `~/.ahub/` e escreve `config.json` |
 | `setConfigValue()` | Muta config em memoria, depois persiste via `saveConfig` |
+| `inspectDeployTargets()` | Faz `access()` nos roots resolvidos para informar existencia |
 
 ## Decisoes de Design
 
@@ -156,3 +175,4 @@ Gerenciar a configuracao persistente do agent-hub armazenada em `~/.ahub/config.
 | Data | Mudanca |
 |------|---------|
 | 2026-03-05 | Spec criada |
+| 2026-03-06 | Documentada resolucao de roots por workspace e inspecao de diretorios por agente |

@@ -17,7 +17,7 @@ Contrato para todos os alvos de deploy (`Deployer`) e factory assincrona que ins
 1. A factory usa `import()` dinamico (lazy import) — so carrega o codigo do deployer que sera usado, nunca importa todos os tres deployers de uma vez
 2. `createDeployer()` e `async` porque usa `import()` dinamico
 3. `deploy()` sempre retorna o caminho absoluto onde a skill foi escrita no disco
-4. `customPath` sobrescreve o diretorio padrao quando fornecido ao construtor
+4. `customPath` sobrescreve o diretorio padrao quando fornecido ao construtor; ele pode apontar para a raiz do agente (ex.: `/repo/.codex`) ou para um subdiretorio especifico por tipo (ex.: `/repo/.codex/skills`)
 5. Todo deployer valida o nome da skill com `assertSafeSkillName()` antes de qualquer operacao de escrita (prevencao de path traversal)
 6. `undeploy()` e idempotente: se o arquivo/diretorio nao existe, retorna silenciosamente sem erro
 7. Cada deployer produz formato diferente: claude-code escreve `.md` com body, codex copia diretorio completo, cursor escreve `.md` com body
@@ -36,6 +36,12 @@ Contrato para todos os alvos de deploy (`Deployer`) e factory assincrona que ins
 - **Given**: `target === 'codex'` e `customPath === '/custom/path/skills'`
 - **When**: `await createDeployer(target, customPath)`
 - **Then**: Importa dinamicamente `./codex.js`, retorna `CodexDeployer` com basePath `/custom/path/skills`
+
+### Factory aceita raiz de workspace para target
+
+- **Given**: `target === 'codex'` e `customPath === '/repo/app/.codex'`
+- **When**: `await createDeployer(target, customPath)` seguido de `deploy(pkg)` para `type === 'skill'`
+- **Then**: O deploy acontece em `/repo/app/.codex/skills/<name>/`
 
 ### Factory cria CursorDeployer com cwd como base
 
@@ -126,3 +132,4 @@ Contrato para todos os alvos de deploy (`Deployer`) e factory assincrona que ins
 | Data | Mudanca |
 |------|---------|
 | 2025-03-05 | Spec criada |
+| 2026-03-06 | Documentado suporte a `customPath` como raiz do agente/workspace, nao apenas subdiretorio final |

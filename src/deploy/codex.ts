@@ -37,10 +37,19 @@ export class CodexDeployer implements Deployer {
     this.defaultRoot = path.join(os.homedir(), '.codex');
   }
 
+  private usesExactSubdir(): boolean {
+    if (!this.customPath) return false;
+    return Object.values(TYPE_SUBDIRS).includes(path.basename(this.customPath) as ContentType);
+  }
+
   /** Resolve the deploy directory based on content type. */
   private resolveDir(type?: ContentType): string {
-    if (this.customPath) return this.customPath;
     const subdir = TYPE_SUBDIRS[type ?? 'skill'];
+    if (this.customPath) {
+      return this.usesExactSubdir()
+        ? this.customPath
+        : path.join(this.customPath, subdir);
+    }
     return path.join(this.defaultRoot, subdir);
   }
 
@@ -73,7 +82,10 @@ export class CodexDeployer implements Deployer {
   async undeploy(name: string): Promise<void> {
     // Check all type subdirectories since we don't know the type.
     for (const subdir of Object.values(TYPE_SUBDIRS)) {
-      const skillDir = path.join(this.customPath ?? path.join(this.defaultRoot, subdir), name);
+      const baseDir = this.customPath
+        ? (this.usesExactSubdir() ? this.customPath : path.join(this.customPath, subdir))
+        : path.join(this.defaultRoot, subdir);
+      const skillDir = path.join(baseDir, name);
       try {
         await access(skillDir);
         await rm(skillDir, { recursive: true, force: true });

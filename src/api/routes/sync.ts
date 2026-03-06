@@ -2,6 +2,7 @@
  * Sync routes — POST /api/sync + GET /api/sync/stream (SSE)
  */
 
+import path from 'node:path';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { requireConfig, getWorkspaceRegistry } from '../../core/config.js';
@@ -31,7 +32,10 @@ export function syncRoutes(): Hono {
     }
 
     const manifest = await loadWorkspaceManifest(manifestPath);
-    const result = await syncWorkspace(manifest, config, body);
+    const result = await syncWorkspace(manifest, config, {
+      ...body,
+      workspaceDir: path.dirname(manifestPath),
+    });
 
     return c.json({ data: result });
   });
@@ -62,6 +66,7 @@ export function syncRoutes(): Hono {
           force,
           dryRun,
           filter,
+          workspaceDir: path.dirname(manifestPath),
           onProgress: async (event: SyncProgressEvent) => {
             await stream.writeSSE({
               event: 'progress',

@@ -8,7 +8,6 @@
 
 import type {
   AhubConfig,
-  DeployTarget,
   SyncDeployedEntry,
   SyncFailedEntry,
   SyncOptions,
@@ -16,6 +15,7 @@ import type {
   WorkspaceManifest,
 } from './types.js';
 import { CacheManager } from './cache.js';
+import { resolveDeployTargetRoot } from './config.js';
 import { createProvider } from '../storage/factory.js';
 import { createDeployer } from '../deploy/deployer.js';
 import { resolveManifestSkills } from './workspace.js';
@@ -43,6 +43,7 @@ export async function syncWorkspace(
 ): Promise<SyncResult> {
   const force = options?.force ?? false;
   const dryRun = options?.dryRun ?? false;
+  const workspaceDir = options?.workspaceDir;
   const onProgress = options?.onProgress;
 
   // 1. Resolve the manifest.
@@ -101,8 +102,8 @@ export async function syncWorkspace(
           });
 
           try {
-            const customPath = config.deployTargets?.[target];
-            const deployer = await createDeployer(target, customPath);
+            const deployRoot = resolveDeployTargetRoot(target, config, workspaceDir);
+            const deployer = await createDeployer(target, deployRoot);
             const deployedPath = await deployer.deploy(cached);
             deployed.push({ skill: name, target, path: deployedPath });
           } catch (err) {
@@ -140,8 +141,8 @@ export async function syncWorkspace(
         });
 
         try {
-          const customPath = config.deployTargets?.[target];
-          const deployer = await createDeployer(target, customPath);
+          const deployRoot = resolveDeployTargetRoot(target, config, workspaceDir);
+          const deployer = await createDeployer(target, deployRoot);
           const deployedPath = await deployer.deploy(pkg);
           deployed.push({ skill: name, target, path: deployedPath });
         } catch (err) {

@@ -172,6 +172,8 @@ export interface AhubConfig {
 export interface WorkspaceRegistryEntry {
   /** Absolute path to the manifest file. */
   filePath: string;
+  /** Absolute path to the workspace directory (manifest parent). */
+  workspaceDir: string;
   /** The loaded manifest (null if file is missing/invalid). */
   manifest: WorkspaceManifest | null;
   /** Whether this is the currently active workspace. */
@@ -234,6 +236,22 @@ export interface WorkspaceManifest {
   profile?: string;
 }
 
+/** Resolved target directories for a workspace or tool environment. */
+export interface DeployTargetDirectory {
+  /** Deployment target. */
+  target: DeployTarget;
+  /** Human-readable agent/app label. */
+  label: string;
+  /** How this root path was chosen. */
+  source: 'workspace-local' | 'config-override' | 'tool-default';
+  /** Root directory for the agent/app (for example `project/.codex`). */
+  rootPath: string;
+  /** Whether the root already exists on disk. */
+  exists: boolean;
+  /** Type-aware directories derived from the root path. */
+  directories: Record<ContentType, string>;
+}
+
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------
@@ -270,6 +288,8 @@ export interface SyncOptions {
   filter?: string[];
   /** Dry run — report what would happen without deploying. */
   dryRun?: boolean;
+  /** Workspace directory used to resolve per-project target paths. */
+  workspaceDir?: string;
   /** Progress callback for CLI spinners / MCP progress. */
   onProgress?: (event: SyncProgressEvent) => void;
 }

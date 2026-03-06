@@ -4,7 +4,7 @@
 
 ## Proposito
 
-Gerenciar o manifesto de workspace (`ahub.workspace.json` ou `.ahub.json`) que declara quais skills um projeto precisa e para quais targets de deploy elas devem ser enviadas. O modulo busca o manifesto subindo a arvore de diretorios, valida o schema, e resolve a lista final de skills com seus targets mesclados.
+Gerenciar o arquivo de workspace (`ahub.workspace.json` ou `.ahub.json`) que funciona como profile de sync de um projeto. O modulo busca o arquivo subindo a arvore de diretorios, valida o schema e resolve a lista final de skills com seus targets mesclados. O arquivo nao e a origem das skills; ele apenas descreve o que o projeto deseja sincronizar.
 
 ## Localizacao
 
@@ -14,7 +14,7 @@ Gerenciar o manifesto de workspace (`ahub.workspace.json` ou `.ahub.json`) que d
 
 ## Invariantes
 
-1. A busca pelo manifesto e ascendente: comeca no `startDir` (ou `cwd`) e sobe ate a raiz do filesystem.
+1. A busca pelo arquivo de workspace e ascendente: comeca no `startDir` (ou `cwd`) e sobe ate a raiz do filesystem.
 2. Dois nomes sao aceitos, nesta ordem de prioridade: `ahub.workspace.json`, `.ahub.json`.
 3. `version: 1` e obrigatorio — qualquer outro valor lanca `Error`.
 4. Targets invalidos (fora de `'claude-code' | 'codex' | 'cursor'`) sao rejeitados durante `loadWorkspaceManifest`.
@@ -24,6 +24,7 @@ Gerenciar o manifesto de workspace (`ahub.workspace.json` ou `.ahub.json`) que d
 8. Skills presentes tanto em `groups` quanto em `skills` tem seus targets mesclados (uniao de conjuntos).
 9. O resultado de `resolveManifestSkills` e ordenado alfabeticamente por nome, e os targets de cada skill tambem sao ordenados alfabeticamente.
 10. `saveWorkspaceManifest` serializa com indentacao de 2 espacos e newline final.
+11. Um workspace pode ser criado com `skills: []` e continuar valido para representar um projeto novo.
 
 ## Comportamentos (Given/When/Then)
 
@@ -88,6 +89,12 @@ Gerenciar o manifesto de workspace (`ahub.workspace.json` ou `.ahub.json`) que d
 - **Given**: Nenhum manifesto existe na arvore de diretorios.
 - **When**: `requireWorkspaceManifest('/projeto/app')` e chamado.
 - **Then**: Lanca `WorkspaceNotFoundError` com `searchDir` = `'/projeto/app'`.
+
+### Cenario: Profile vazio para projeto novo
+
+- **Given**: Arquivo `ahub.workspace.json` contem `{ "version": 1, "name": "app-novo", "skills": [] }`
+- **When**: `loadWorkspaceManifest(path)` e chamado e depois `resolveManifestSkills(manifest)`
+- **Then**: O manifesto e considerado valido e `resolveManifestSkills` retorna `[]`
 
 ## Contratos de Interface
 
@@ -165,3 +172,4 @@ interface ResolvedSkill {
 | Data | Mudanca |
 |------|---------|
 | 2026-03-05 | Spec criada |
+| 2026-03-06 | Documento reposicionado como profile de sync por projeto; registrado suporte explicito a workspace vazio |

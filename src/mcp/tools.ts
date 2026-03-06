@@ -1,6 +1,7 @@
+import path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { loadConfig, requireConfig, listSources } from '../core/config.js';
+import { loadConfig, requireConfig, listSources, resolveDeployTargetRoot } from '../core/config.js';
 import { createProvider, createAggregateProvider, createProviderFromSource } from '../storage/factory.js';
 import { parseSkill, serializeSkill, validateSkill, getMarkerFile, extractSkillExtensions } from '../core/skill.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
@@ -202,8 +203,10 @@ export function registerTools(server: McpServer): void {
         const provider = await getProvider(source);
         const pkg = await provider.get(name);
         const config = await loadConfig();
-        const customPath = config?.deployTargets?.[target as DeployTarget];
-        const deployer = await createDeployer(target as DeployTarget, customPath);
+        const manifestPath = await findWorkspaceManifest();
+        const workspaceDir = manifestPath ? path.dirname(manifestPath) : process.cwd();
+        const deployRoot = resolveDeployTargetRoot(target as DeployTarget, config, workspaceDir);
+        const deployer = await createDeployer(target as DeployTarget, deployRoot);
         const deployedPath = await deployer.deploy(pkg);
 
         return {
@@ -281,9 +284,11 @@ export function registerTools(server: McpServer): void {
       try {
         const config = await requireConfig();
 
+        let resolvedPath: string;
         let manifest;
         if (manifestPath) {
           manifest = await loadWorkspaceManifest(manifestPath);
+          resolvedPath = manifestPath;
         } else {
           const found = await findWorkspaceManifest();
           if (!found) {
@@ -295,9 +300,14 @@ export function registerTools(server: McpServer): void {
             };
           }
           manifest = await loadWorkspaceManifest(found);
+          resolvedPath = found;
         }
 
-        const result = await syncWorkspace(manifest, config, { force, filter });
+        const result = await syncWorkspace(manifest, config, {
+          force,
+          filter,
+          workspaceDir: path.dirname(resolvedPath),
+        });
 
         const lines: string[] = [];
         if (result.deployed.length > 0) {

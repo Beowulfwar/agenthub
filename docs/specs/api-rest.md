@@ -73,6 +73,12 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - **When**: `POST /api/workspace/registry`
 - **Then**: Cria `/projeto/app/ahub.workspace.json`, registra esse manifesto e retorna `{ data: { registered, created: true } }`
 
+### GET /api/workspace expoe o projeto ativo e os diretorios reconhecidos
+
+- **Given**: Existe um workspace ativo em `/projeto/app`
+- **When**: `GET /api/workspace`
+- **Then**: Retorna `workspaceDir`, `filePath`, `resolved` e `targetDirectories[]`, onde cada target informa a raiz e as pastas `skill`, `prompt` e `subagent` que o sync usara
+
 ### POST /api/explorer/pick-directory retorna a pasta selecionada no dialogo nativo
 
 - **Given**: Cliente aciona a rota a partir da UI local
@@ -109,7 +115,7 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | PUT | `/api/config/:key` | Definir valor por dot-path | `{ data: { key, value } }` | — |
 | GET | `/api/cache` | Listar skills em cache | `{ data: string[] }` | — |
 | DELETE | `/api/cache` | Limpar todo o cache | `{ data: { cleared: true } }` | — |
-| GET | `/api/workspace` | Manifest + skills resolvidas | `{ data: { manifest, filePath, resolved } }` | — |
+| GET | `/api/workspace` | Workspace ativo + skills resolvidas + diretorios reconhecidos | `{ data: { manifest, filePath, workspaceDir, resolved, targetDirectories } }` | — |
 | PUT | `/api/workspace` | Salvar manifest | `{ data: { saved } }` | — |
 | GET | `/api/workspace/registry` | Listar workspaces registrados | `{ data: WorkspaceRegistryEntry[] }` | — |
 | POST | `/api/workspace/registry` | Registrar ou criar workspace a partir de manifesto/pasta | `{ data: { registered, created } }` | 400 |
@@ -160,7 +166,7 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - `DELETE /api/skills/:name`: Remove skill do backend (git rm+commit+push ou soft-delete no Drive)
 - `PUT /api/config/:key`: Modifica `~/.ahub/config.json` no disco
 - `DELETE /api/cache`: Remove todos os arquivos em `~/.ahub/cache/`
-- `POST /api/deploy`: Escreve arquivos no filesystem local (diretorio do deployer alvo)
+- `POST /api/deploy`: Escreve arquivos no filesystem local (override global ou diretorio reconhecido do workspace ativo)
 - `POST /api/workspace/registry`: Pode criar `ahub.workspace.json` no filesystem local antes de registrar o manifesto
 - `POST /api/explorer/pick-directory`: Abre o seletor nativo de pastas do sistema operacional local
 - `POST /api/sync` e `GET /api/sync/stream`: Combinam efeitos de storage e deploy (fetch + escrita local)
@@ -184,3 +190,4 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 |------|---------|
 | 2025-03-05 | Spec criada |
 | 2026-03-06 | Documentados explorer REST, picker nativo de pasta e registro de workspace por diretorio |
+| 2026-03-06 | Documentado retorno de diretorios reconhecidos por target no payload de workspace |

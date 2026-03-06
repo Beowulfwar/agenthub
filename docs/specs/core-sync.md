@@ -4,7 +4,7 @@
 
 ## Proposito
 
-Motor de sincronizacao que le um workspace manifest, busca skills do storage provider, e faz deploy de cada uma para os targets declarados. Modulo desacoplado da CLI para ser reutilizado por MCP tools e testes. Funcao unica: `syncWorkspace`.
+Motor de sincronizacao que le um workspace manifest, busca skills do storage provider, e faz deploy de cada uma para os targets declarados. Quando o caller informa `workspaceDir`, o sync resolve os diretorios de deploy do projeto ativo antes de instanciar os deployers. Modulo desacoplado da CLI para ser reutilizado por MCP tools e testes. Funcao unica: `syncWorkspace`.
 
 ## Localizacao
 
@@ -24,6 +24,7 @@ Motor de sincronizacao que le um workspace manifest, busca skills do storage pro
 9. Quando cache esta fresh e nao e `force`, a skill e deployada a partir do cache sem fetch remoto.
 10. Quando `force` e `true`, `isFresh` e ignorado e o fetch remoto e sempre executado.
 11. Se `isFresh` retorna `true` mas `getCachedSkill` retorna `null` (inconsistencia), faz fallthrough para fetch remoto.
+12. Quando `workspaceDir` e informado, o root de deploy por target respeita a precedencia: override global -> raiz local do workspace -> padrao nativo da ferramenta.
 
 ## Comportamentos (Given/When/Then)
 
@@ -81,6 +82,12 @@ Motor de sincronizacao que le um workspace manifest, busca skills do storage pro
 - **When**: `syncWorkspace(manifest, config, { onProgress })` e chamado.
 - **Then**: `onProgress` recebe pelo menos 1 evento com `phase: 'fetch'` e 1 com `phase: 'deploy'`, ambos com `skill: 'skill-a'` e campos `current`/`total` numericos.
 
+### Cenario: Sync usa diretorio local do projeto
+
+- **Given**: Manifesto declara `skill-a` para `codex` e `workspaceDir === '/repos/app-a'`
+- **When**: `syncWorkspace(manifest, config, { workspaceDir })` e chamado
+- **Then**: O deployer e instanciado com root `'/repos/app-a/.codex'`, a menos que exista override global em `config.deployTargets.codex`
+
 ## Contratos de Interface
 
 ### Funcoes Publicas
@@ -102,6 +109,7 @@ interface SyncOptions {
   force?: boolean;
   filter?: string[];
   dryRun?: boolean;
+  workspaceDir?: string;
   onProgress?: (event: SyncProgressEvent) => void;
 }
 
@@ -121,6 +129,7 @@ interface SyncProgressEvent {
 | `./types.js` | `AhubConfig`, `SyncResult`, `SyncOptions`, `SyncProgressEvent`, etc. |
 | `./cache.js` | `CacheManager` — verifica freshness e armazena skills |
 | `../storage/factory.js` | `createProvider(config)` — cria o provider de storage |
+| `./config.js` | `resolveDeployTargetRoot` — resolve raiz de deploy por target/workspace |
 | `../deploy/deployer.js` | `createDeployer(target, customPath?)` — cria deployer por target |
 | `./workspace.js` | `resolveManifestSkills` — converte manifesto em lista flat |
 
@@ -136,7 +145,7 @@ interface SyncProgressEvent {
 |----------|--------|
 | `provider.get(name)` | Acesso a rede (git clone/pull ou Google Drive API) |
 | `cache.cacheSkill(pkg)` | Escrita em `~/.ahub/cache/<name>/` |
-| `deployer.deploy(pkg)` | Escrita de arquivos nos paths de deploy (ex.: `~/.claude/commands/`) |
+| `deployer.deploy(pkg)` | Escrita de arquivos nos paths de deploy (ex.: `/repo/.codex/skills/` ou `~/.claude/commands/`) |
 | Modo `dryRun` | Nenhum efeito colateral — apenas leitura |
 
 ## Decisoes de Design
@@ -157,3 +166,4 @@ interface SyncProgressEvent {
 | Data | Mudanca |
 |------|---------|
 | 2026-03-05 | Spec criada |
+| 2026-03-06 | Documentada a resolucao de roots por workspace no fluxo de sync |

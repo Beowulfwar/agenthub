@@ -16,6 +16,7 @@ Documentacao comportamental spec-driven. Cada spec e' um contrato vivo que docum
 | [core-skill](core-skill.md) | Skill parse/serialize/validate | `src/core/skill.ts` | `tests/specs/core-skill.spec.ts` |
 | [core-config](core-config.md) | Config CRUD | `src/core/config.ts` | `tests/specs/core-config.spec.ts` |
 | [core-workspace](core-workspace.md) | Workspace manifest | `src/core/workspace.ts` | `tests/specs/core-workspace.spec.ts` |
+| [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
 | [core-sync](core-sync.md) | Sync engine | `src/core/sync.ts` | `tests/specs/core-sync.spec.ts` |
 | [core-cache](core-cache.md) | Cache com TTL | `src/core/cache.ts` | `tests/specs/core-cache.spec.ts` |
 | [storage-provider](storage-provider.md) | Storage factory + providers | `src/storage/` | — |

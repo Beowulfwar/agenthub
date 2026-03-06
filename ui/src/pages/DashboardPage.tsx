@@ -77,8 +77,8 @@ export function DashboardPage() {
             </div>
           ) : (
             <p className="mt-3 text-sm text-gray-500">
-              No workspace manifest found. Create one to sync skills across
-              environments.
+              No project workspace selected. Register a project folder to sync skills into
+              recognized directories like `.codex`, `.claude` and `.cursor`.
             </p>
           )}
         </div>

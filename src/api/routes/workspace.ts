@@ -11,6 +11,8 @@ import {
   resolveManifestSkills,
 } from '../../core/workspace.js';
 import {
+  inspectDeployTargets,
+  loadConfig,
   getWorkspaceRegistry,
   registerWorkspace,
   unregisterWorkspace,
@@ -37,6 +39,7 @@ export function workspaceRoutes(): Hono {
         const resolved = resolveManifestSkills(manifest);
         entries.push({
           filePath,
+          workspaceDir: path.dirname(filePath),
           manifest,
           isActive: filePath === registry.active,
           skillCount: resolved.length,
@@ -44,6 +47,7 @@ export function workspaceRoutes(): Hono {
       } catch (err) {
         entries.push({
           filePath,
+          workspaceDir: path.dirname(filePath),
           manifest: null,
           isActive: filePath === registry.active,
           skillCount: 0,
@@ -153,21 +157,35 @@ export function workspaceRoutes(): Hono {
 
     if (!filePath) {
       return c.json({
-        data: { manifest: null, filePath: null, resolved: [] },
+        data: {
+          manifest: null,
+          filePath: null,
+          workspaceDir: null,
+          resolved: [],
+          targetDirectories: [],
+        },
       });
     }
+
+    const workspaceDir = path.dirname(filePath);
+    const config = await loadConfig();
+    const targetDirectories = await inspectDeployTargets(config, workspaceDir);
 
     try {
       const manifest = await loadWorkspaceManifest(filePath);
       const resolved = resolveManifestSkills(manifest);
-      return c.json({ data: { manifest, filePath, resolved } });
+      return c.json({
+        data: { manifest, filePath, workspaceDir, resolved, targetDirectories },
+      });
     } catch (err) {
       // File might not exist anymore — return gracefully
       return c.json({
         data: {
           manifest: null,
           filePath,
+          workspaceDir,
           resolved: [],
+          targetDirectories,
           error: (err as Error).message,
         },
       });
