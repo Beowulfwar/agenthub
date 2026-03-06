@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { requireConfig } from '../../core/config.js';
-import { createProvider } from '../../storage/factory.js';
+import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { loadSkillPackage, validateSkill } from '../../core/skill.js';
 import { assertSafePackage } from '../../core/sanitize.js';
 
@@ -14,9 +14,10 @@ export function createPushCommand(): Command {
   return new Command('push')
     .description('Push a local skill directory to the store')
     .argument('<path>', 'Path to the skill directory (must contain SKILL.md)')
-    .action(async (dirPath: string) => {
+    .option('-s, --source <id>', 'Push to this source')
+    .action(async (dirPath: string, opts: { source?: string }) => {
       try {
-        await runPush(dirPath);
+        await runPush(dirPath, opts.source);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -29,7 +30,7 @@ export function createPushCommand(): Command {
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runPush(dirPath: string): Promise<void> {
+async function runPush(dirPath: string, sourceId?: string): Promise<void> {
   // Load and validate.
   const spinner = ora('Loading skill package...').start();
   const pkg = await loadSkillPackage(dirPath);
@@ -41,7 +42,15 @@ async function runPush(dirPath: string): Promise<void> {
 
   // Push to remote.
   const config = await requireConfig();
-  const provider = createProvider(config);
+
+  let provider;
+  if (sourceId && config.version === 2 && config.sources) {
+    const src = config.sources.find((s) => s.id === sourceId);
+    if (!src) throw new Error(`Source "${sourceId}" not found.`);
+    provider = createProviderFromSource(src);
+  } else {
+    provider = createProvider(config);
+  }
 
   const pushSpinner = ora(
     `Pushing "${pkg.skill.name}" to ${provider.name}...`,

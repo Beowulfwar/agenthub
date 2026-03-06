@@ -6,15 +6,18 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { requireConfig } from '../../core/config.js';
-import { createProvider } from '../../storage/factory.js';
+import { createProvider, createProviderFromSource } from '../../storage/factory.js';
+import type { ContentType } from '../../core/types.js';
 
 export function createSearchCommand(): Command {
   return new Command('search')
     .description('Search skills by name')
     .argument('<query>', 'Search query (substring match)')
-    .action(async (query: string) => {
+    .option('-s, --source <id>', 'Search only this source')
+    .option('-T, --type <type>', 'Filter by content type (skill, prompt, subagent)')
+    .action(async (query: string, opts: { source?: string; type?: string }) => {
       try {
-        await runSearch(query);
+        await runSearch(query, opts.source, opts.type as ContentType | undefined);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -27,12 +30,20 @@ export function createSearchCommand(): Command {
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runSearch(query: string): Promise<void> {
+async function runSearch(query: string, sourceId?: string, type?: ContentType): Promise<void> {
   const config = await requireConfig();
-  const provider = createProvider(config);
+
+  let provider;
+  if (sourceId && config.version === 2 && config.sources) {
+    const src = config.sources.find((s) => s.id === sourceId);
+    if (!src) throw new Error(`Source "${sourceId}" not found.`);
+    provider = createProviderFromSource(src);
+  } else {
+    provider = createProvider(config);
+  }
 
   const spinner = ora(`Searching for "${query}"...`).start();
-  const allNames = await provider.list();
+  const allNames = await provider.list(type ? { type } : undefined);
   const matches = allNames.filter((n) => n.toLowerCase().includes(query.toLowerCase()));
   spinner.stop();
 

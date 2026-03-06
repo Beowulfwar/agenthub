@@ -9,9 +9,9 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { requireConfig } from '../../core/config.js';
-import { createProvider } from '../../storage/factory.js';
+import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { createDeployer } from '../../deploy/deployer.js';
-import type { DeployTarget } from '../../core/types.js';
+import type { ContentType, DeployTarget } from '../../core/types.js';
 
 const VALID_TARGETS: DeployTarget[] = ['claude-code', 'codex', 'cursor'];
 
@@ -24,10 +24,12 @@ export function createDeployCommand(): Command {
       `Deployment target: ${VALID_TARGETS.join(', ')}`,
     )
     .option('-a, --all', 'Deploy all skills in the store')
+    .option('-s, --source <id>', 'Deploy from this source')
+    .option('-T, --type <type>', 'Filter by content type when using --all (skill, prompt, subagent)')
     .action(
       async (
         name: string | undefined,
-        opts: { target: string; all?: boolean },
+        opts: { target: string; all?: boolean; source?: string; type?: string },
       ) => {
         try {
           await runDeploy(name, opts);
@@ -46,13 +48,16 @@ export function createDeployCommand(): Command {
 
 async function runDeploy(
   name: string | undefined,
-  opts: { target: string; all?: boolean },
+  opts: { target: string; all?: boolean; source?: string; type?: string },
 ): Promise<void> {
-  const target = opts.target as DeployTarget;
-  if (!VALID_TARGETS.includes(target)) {
-    throw new Error(
-      `Invalid target "${opts.target}". Valid targets: ${VALID_TARGETS.join(', ')}`,
-    );
+  // Support comma-separated targets (e.g. "claude-code,cursor").
+  const targets = opts.target.split(',').map((t) => t.trim()) as DeployTarget[];
+  for (const t of targets) {
+    if (!VALID_TARGETS.includes(t)) {
+      throw new Error(
+        `Invalid target "${t}". Valid targets: ${VALID_TARGETS.join(', ')}`,
+      );
+    }
   }
 
   if (!opts.all && !name) {
@@ -62,14 +67,27 @@ async function runDeploy(
   }
 
   const config = await requireConfig();
-  const provider = createProvider(config);
-  const customPath = config.deployTargets?.[target];
-  const deployer = await createDeployer(target, customPath);
 
-  if (opts.all) {
-    await deployAll(provider, deployer, target);
+  let provider;
+  if (opts.source && config.version === 2 && config.sources) {
+    const src = config.sources.find((s) => s.id === opts.source);
+    if (!src) throw new Error(`Source "${opts.source}" not found.`);
+    provider = createProviderFromSource(src);
   } else {
-    await deploySingle(name!, provider, deployer, target);
+    provider = createProvider(config);
+  }
+
+  const typeFilter = opts.type as ContentType | undefined;
+
+  for (const target of targets) {
+    const customPath = config.deployTargets?.[target];
+    const deployer = await createDeployer(target, customPath);
+
+    if (opts.all) {
+      await deployAll(provider, deployer, target, typeFilter);
+    } else {
+      await deploySingle(name!, provider, deployer, target);
+    }
   }
 }
 
@@ -92,9 +110,10 @@ async function deployAll(
   provider: ReturnType<typeof createProvider> extends infer P ? P : never,
   deployer: Awaited<ReturnType<typeof createDeployer>>,
   target: DeployTarget,
+  typeFilter?: ContentType,
 ): Promise<void> {
   const spinner = ora(`Loading skills for deployment to ${target}...`).start();
-  const names = await provider.list();
+  const names = await provider.list(typeFilter ? { type: typeFilter } : undefined);
   spinner.text = `Deploying ${names.length} skill(s) to ${target}...`;
 
   let deployed = 0;

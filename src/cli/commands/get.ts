@@ -8,16 +8,17 @@ import ora from 'ora';
 import path from 'node:path';
 import os from 'node:os';
 import { requireConfig } from '../../core/config.js';
-import { createProvider } from '../../storage/factory.js';
+import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { CacheManager } from '../../core/cache.js';
 
 export function createGetCommand(): Command {
   return new Command('get')
     .description('Fetch a skill by name and cache it locally')
     .argument('<name>', 'Skill name to retrieve')
-    .action(async (name: string) => {
+    .option('-s, --source <id>', 'Fetch from this source')
+    .action(async (name: string, opts: { source?: string }) => {
       try {
-        await runGet(name);
+        await runGet(name, opts.source);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -30,9 +31,17 @@ export function createGetCommand(): Command {
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runGet(name: string): Promise<void> {
+async function runGet(name: string, sourceId?: string): Promise<void> {
   const config = await requireConfig();
-  const provider = createProvider(config);
+
+  let provider;
+  if (sourceId && config.version === 2 && config.sources) {
+    const src = config.sources.find((s) => s.id === sourceId);
+    if (!src) throw new Error(`Source "${sourceId}" not found.`);
+    provider = createProviderFromSource(src);
+  } else {
+    provider = createProvider(config);
+  }
 
   const spinner = ora(`Fetching skill "${name}"...`).start();
   const pkg = await provider.get(name);
@@ -42,9 +51,12 @@ async function runGet(name: string): Promise<void> {
   const cache = new CacheManager();
   await cache.cacheSkill(pkg);
 
-  // Print the SKILL.md body.
+  // Print info.
   console.log('');
   console.log(chalk.bold(`── ${pkg.skill.name} ──`));
+  if (pkg.skill.type && pkg.skill.type !== 'skill') {
+    console.log(chalk.cyan(`Type: ${pkg.skill.type}`));
+  }
   if (pkg.skill.description) {
     console.log(chalk.dim(pkg.skill.description));
   }

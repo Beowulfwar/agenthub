@@ -6,15 +6,18 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { requireConfig } from '../../core/config.js';
-import { createProvider } from '../../storage/factory.js';
+import { createProvider, createProviderFromSource } from '../../storage/factory.js';
+import type { ContentType } from '../../core/types.js';
 
 export function createListCommand(): Command {
   return new Command('list')
     .alias('ls')
     .description('List all available skills')
-    .action(async () => {
+    .option('-s, --source <id>', 'Only list skills from this source')
+    .option('-T, --type <type>', 'Filter by content type (skill, prompt, subagent)')
+    .action(async (opts: { source?: string; type?: string }) => {
       try {
-        await runList();
+        await runList(opts.source, opts.type as ContentType | undefined);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -27,22 +30,32 @@ export function createListCommand(): Command {
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runList(): Promise<void> {
+async function runList(sourceId?: string, type?: ContentType): Promise<void> {
   const config = await requireConfig();
-  const provider = createProvider(config);
+
+  let provider;
+  if (sourceId && config.version === 2 && config.sources) {
+    const src = config.sources.find((s) => s.id === sourceId);
+    if (!src) throw new Error(`Source "${sourceId}" not found.`);
+    provider = createProviderFromSource(src);
+  } else {
+    provider = createProvider(config);
+  }
 
   const spinner = ora('Loading skills...').start();
-  const names = await provider.list();
+  const names = await provider.list(type ? { type } : undefined);
   spinner.stop();
 
   if (names.length === 0) {
-    console.log(chalk.yellow('No skills found in the store.'));
+    const suffix = type ? ` of type "${type}"` : '';
+    console.log(chalk.yellow(`No skills found${suffix} in the store.`));
     return;
   }
 
   // Formatted table output.
+  const header = type ? `  #  ${type.charAt(0).toUpperCase() + type.slice(1)} Name` : '  #  Skill Name';
   console.log('');
-  console.log(chalk.bold('  #  Skill Name'));
+  console.log(chalk.bold(header));
   console.log(chalk.dim('  ' + '─'.repeat(40)));
 
   for (let i = 0; i < names.length; i++) {
@@ -51,5 +64,5 @@ async function runList(): Promise<void> {
   }
 
   console.log('');
-  console.log(chalk.dim(`  ${names.length} skill(s) total`));
+  console.log(chalk.dim(`  ${names.length} item(s) total`));
 }

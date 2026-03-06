@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api-server",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-c", "cd /home/jesse/programacao/python/projeto_varjao/agent-hub && npx tsx bin/ahub.ts ui --dev"],
+      "port": 3737
+    },
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-e", "bash", "-c", "cd /home/jesse/programacao/python/projeto_varjao/agent-hub/ui && npx vite --port 5175"],
+      "port": 5175
+    }
+  ]
+}

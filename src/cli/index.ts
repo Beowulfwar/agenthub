@@ -17,10 +17,19 @@ import { createGetCommand } from './commands/get.js';
 import { createPushCommand } from './commands/push.js';
 import { createSearchCommand } from './commands/search.js';
 import { createDeployCommand } from './commands/deploy.js';
+import { createSyncCommand } from './commands/sync.js';
 import { createMigrateCommand } from './commands/migrate.js';
 import { createImportCommand } from './commands/import-cmd.js';
 import { createExportCommand } from './commands/export-cmd.js';
 import { createConfigCommand } from './commands/config-cmd.js';
+import { createUiCommand } from './commands/ui.js';
+import { createSourceCommand } from './commands/source.js';
+import { createCopyCommand } from './commands/copy.js';
+import { createEditCommand } from './commands/edit.js';
+import { createCloneCommand } from './commands/clone.js';
+import { createRenameCommand } from './commands/rename.js';
+import { createInfoCommand } from './commands/info.js';
+import { createWorkspaceCommand } from './commands/workspace.js';
 
 /**
  * Create the top-level Commander program with every sub-command
@@ -42,10 +51,19 @@ export function createCli(): Command {
   program.addCommand(createPushCommand());
   program.addCommand(createSearchCommand());
   program.addCommand(createDeployCommand());
+  program.addCommand(createSyncCommand());
   program.addCommand(createMigrateCommand());
   program.addCommand(createImportCommand());
   program.addCommand(createExportCommand());
   program.addCommand(createConfigCommand());
+  program.addCommand(createUiCommand());
+  program.addCommand(createSourceCommand());
+  program.addCommand(createCopyCommand());
+  program.addCommand(createEditCommand());
+  program.addCommand(createCloneCommand());
+  program.addCommand(createRenameCommand());
+  program.addCommand(createInfoCommand());
+  program.addCommand(createWorkspaceCommand());
 
   // MCP sub-command — starts the Model Context Protocol server.
   program
