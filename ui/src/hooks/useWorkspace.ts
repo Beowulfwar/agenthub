@@ -3,6 +3,7 @@ import {
   fetchWorkspace,
   saveWorkspace,
   fetchWorkspaceRegistry,
+  fetchWorkspaceSuggestions,
   registerWorkspaceApi,
   unregisterWorkspaceApi,
   setActiveWorkspaceApi,
@@ -13,10 +14,11 @@ import type { WorkspaceManifest } from '../api/types';
 // Active workspace
 // ---------------------------------------------------------------------------
 
-export function useWorkspace() {
+export function useWorkspace(path?: string | null, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: ['workspace'],
-    queryFn: () => fetchWorkspace(),
+    queryKey: ['workspace', path ?? 'active'],
+    queryFn: () => fetchWorkspace(path ?? undefined),
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -42,6 +44,13 @@ export function useWorkspaceRegistry() {
   });
 }
 
+export function useWorkspaceSuggestions() {
+  return useQuery({
+    queryKey: ['workspace-suggestions'],
+    queryFn: () => fetchWorkspaceSuggestions(),
+  });
+}
+
 export function useRegisterWorkspace() {
   const qc = useQueryClient();
   return useMutation({
@@ -54,6 +63,7 @@ export function useRegisterWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
+      qc.invalidateQueries({ queryKey: ['workspace-suggestions'] });
     },
   });
 }
@@ -65,6 +75,7 @@ export function useUnregisterWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
+      qc.invalidateQueries({ queryKey: ['workspace-suggestions'] });
     },
   });
 }

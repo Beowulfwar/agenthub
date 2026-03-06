@@ -69,6 +69,29 @@ export async function findWorkspaceManifest(
   }
 }
 
+/**
+ * Look for a workspace manifest only inside the provided directory.
+ *
+ * Unlike `findWorkspaceManifest()`, this does not walk parent directories.
+ */
+export async function findWorkspaceManifestInDirectory(
+  dir: string,
+): Promise<string | null> {
+  const resolvedDir = path.resolve(dir);
+
+  for (const filename of WORKSPACE_FILENAMES) {
+    const candidate = path.join(resolvedDir, filename);
+    try {
+      await readFile(candidate, 'utf-8');
+      return candidate;
+    } catch {
+      // File does not exist in this directory — try next.
+    }
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Load & validate
 // ---------------------------------------------------------------------------

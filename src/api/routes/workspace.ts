@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { Hono } from 'hono';
 import {
-  findWorkspaceManifest,
+  findWorkspaceManifestInDirectory,
   loadWorkspaceManifest,
   saveWorkspaceManifest,
   resolveManifestSkills,
@@ -18,6 +18,7 @@ import {
   unregisterWorkspace,
   setActiveWorkspace,
 } from '../../core/config.js';
+import { suggestWorkspaceDirs } from '../../core/explorer.js';
 import type { WorkspaceManifest, WorkspaceRegistryEntry } from '../../core/types.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
 
@@ -75,12 +76,13 @@ export function workspaceRoutes(): Hono {
     if (body.directory) {
       const normalizedDir = await normalizeExternalPath(body.directory);
       const absDir = path.resolve(normalizedDir);
-      const existingManifest = await findWorkspaceManifest(absDir);
+      const existingManifest = await findWorkspaceManifestInDirectory(absDir);
+      const shouldCreate = body.create ?? true;
 
       if (existingManifest) {
         manifestPath = existingManifest;
       } else {
-        if (!body.create) {
+        if (!shouldCreate) {
           throw new Error(`No workspace manifest found in "${absDir}".`);
         }
 
@@ -134,6 +136,12 @@ export function workspaceRoutes(): Hono {
     return c.json({ data: { active: normalizedFile } });
   });
 
+  // GET /api/workspace/suggestions — suggest workspace roots from detected local skills
+  app.get('/suggestions', async (c) => {
+    const suggestions = await suggestWorkspaceDirs();
+    return c.json({ data: suggestions });
+  });
+
   // -------------------------------------------------------------------------
   // Existing endpoints
   // -------------------------------------------------------------------------
@@ -146,13 +154,8 @@ export function workspaceRoutes(): Hono {
     if (customPath) {
       filePath = await normalizeExternalPath(customPath);
     } else {
-      // Check active workspace in registry first, then fall back to cwd walk
       const registry = await getWorkspaceRegistry();
-      if (registry.active) {
-        filePath = registry.active;
-      } else {
-        filePath = await findWorkspaceManifest();
-      }
+      filePath = registry.active ?? null;
     }
 
     if (!filePath) {

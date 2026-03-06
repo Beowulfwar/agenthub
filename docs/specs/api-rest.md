@@ -69,15 +69,27 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 
 ### POST /api/workspace/registry aceita uma pasta e resolve o manifesto
 
-- **Given**: Body `{ directory: "/projeto/app", create: true }` e nenhum `ahub.workspace.json` existe em `/projeto/app` ou acima
+- **Given**: Body `{ directory: "/projeto/app" }` e nenhum `ahub.workspace.json` existe em `/projeto/app`
 - **When**: `POST /api/workspace/registry`
 - **Then**: Cria `/projeto/app/ahub.workspace.json`, registra esse manifesto e retorna `{ data: { registered, created: true } }`
+
+### GET /api/workspace expoe apenas o workspace ativo registrado
+
+- **Given**: Nao existe workspace ativo registrado
+- **When**: `GET /api/workspace`
+- **Then**: Retorna `{ data: { manifest: null, filePath: null, workspaceDir: null, resolved: [], targetDirectories: [] } }`, sem inferir automaticamente um manifesto a partir do diretorio atual
 
 ### GET /api/workspace expoe o projeto ativo e os diretorios reconhecidos
 
 - **Given**: Existe um workspace ativo em `/projeto/app`
 - **When**: `GET /api/workspace`
 - **Then**: Retorna `workspaceDir`, `filePath`, `resolved` e `targetDirectories[]`, onde cada target informa a raiz e as pastas `skill`, `prompt` e `subagent` que o sync usara
+
+### GET /api/workspace/suggestions sugere workspaces a partir de skills locais
+
+- **Given**: Existe um projeto com `./.skills` ou `./.codex/skills`
+- **When**: `GET /api/workspace/suggestions`
+- **Then**: A resposta sugere a raiz do projeto como `workspaceDir`, informa `skillCount`, `detected[]` e se `ahub.workspace.json` ja existe naquela pasta
 
 ### POST /api/explorer/pick-directory retorna a pasta selecionada no dialogo nativo
 
@@ -121,6 +133,7 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | POST | `/api/workspace/registry` | Registrar ou criar workspace a partir de manifesto/pasta | `{ data: { registered, created } }` | 400 |
 | DELETE | `/api/workspace/registry` | Remover workspace registrado | `{ data: { unregistered } }` | — |
 | PUT | `/api/workspace/active` | Definir workspace ativo | `{ data: { active } }` | 400 |
+| GET | `/api/workspace/suggestions` | Sugerir workspaces a partir de skills locais detectadas | `{ data: WorkspaceSuggestion[] }` | — |
 | GET | `/api/explorer/browse?dir=&hidden=` | Listar diretorios navegaveis | `{ data: { currentDir, entries } }` | 400 |
 | GET | `/api/explorer/scan?dir=` | Detectar diretorios de skills conhecidos | `{ data: { baseDir, detected } }` | 400 |
 | GET | `/api/explorer/suggestions` | Sugerir diretorios iniciais para exploracao | `{ data: SuggestionDir[] }` | — |
@@ -168,6 +181,7 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - `DELETE /api/cache`: Remove todos os arquivos em `~/.ahub/cache/`
 - `POST /api/deploy`: Escreve arquivos no filesystem local (override global ou diretorio reconhecido do workspace ativo)
 - `POST /api/workspace/registry`: Pode criar `ahub.workspace.json` no filesystem local antes de registrar o manifesto
+- `GET /api/workspace/suggestions`: Faz leituras rasas em diretorios comuns de trabalho para detectar estruturas conhecidas de skills e sugerir roots de workspace
 - `POST /api/explorer/pick-directory`: Abre o seletor nativo de pastas do sistema operacional local
 - `POST /api/sync` e `GET /api/sync/stream`: Combinam efeitos de storage e deploy (fetch + escrita local)
 - Servico de arquivos estaticos: Le arquivos do `staticDir` e serve com MIME types corretos
@@ -191,3 +205,4 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | 2025-03-05 | Spec criada |
 | 2026-03-06 | Documentados explorer REST, picker nativo de pasta e registro de workspace por diretorio |
 | 2026-03-06 | Documentado retorno de diretorios reconhecidos por target no payload de workspace |
+| 2026-03-06 | Documentado o contrato de sugestoes de workspace e a regra de exibir apenas workspaces registrados |

@@ -18,6 +18,7 @@ import type {
   WorkspaceData,
   WorkspaceManifest,
   WorkspaceRegistryEntry,
+  WorkspaceSuggestion,
   BrowseResult,
   ScanResult,
   SuggestionDir,
@@ -116,6 +117,10 @@ export async function saveWorkspace(filePath: string, manifest: WorkspaceManifes
 
 export async function fetchWorkspaceRegistry(): Promise<WorkspaceRegistryEntry[]> {
   return unwrap(await api.get<ApiSuccess<WorkspaceRegistryEntry[]>>('/workspace/registry'));
+}
+
+export async function fetchWorkspaceSuggestions(): Promise<WorkspaceSuggestion[]> {
+  return unwrap(await api.get<ApiSuccess<WorkspaceSuggestion[]>>('/workspace/suggestions'));
 }
 
 export async function registerWorkspaceApi(

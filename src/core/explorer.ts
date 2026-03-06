@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 
 import { isWSL, normalizeExternalPath, normalizePath, toWindowsPath } from './wsl.js';
 import { ALL_MARKER_FILES } from './types.js';
+import { findWorkspaceManifestInDirectory } from './workspace.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +76,22 @@ export interface DetectedSkillDir {
   tool: string;
   /** Number of skill-like files found. */
   skillCount: number;
+}
+
+/** A suggested workspace root inferred from detected local skills. */
+export interface WorkspaceSuggestion {
+  /** Absolute workspace directory to register. */
+  workspaceDir: string;
+  /** Human-readable origin for the suggestion. */
+  label: string;
+  /** Absolute path to the workspace manifest inside the directory. */
+  manifestPath: string;
+  /** Whether the manifest already exists in the directory. */
+  manifestExists: boolean;
+  /** Total skill-like files found across detected directories. */
+  skillCount: number;
+  /** Detected skill directories inside the workspace. */
+  detected: DetectedSkillDir[];
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +322,38 @@ export function suggestStartDirs(): Array<{ path: string; label: string }> {
 }
 
 /**
+ * Suggest workspace roots based on shallow scans for well-known skill directories.
+ *
+ * The scan favors practical project locations (cwd + common dev roots) and
+ * searches a few directory levels deep so a path like `./.skills` promotes the
+ * project root itself as the workspace suggestion.
+ */
+export async function suggestWorkspaceDirs(): Promise<WorkspaceSuggestion[]> {
+  const results = new Map<string, WorkspaceSuggestion>();
+  const roots = suggestStartDirs();
+  const seenRoots = new Set<string>();
+
+  for (const root of roots) {
+    const normalizedRoot = normalizePath(root.path);
+    if (seenRoots.has(normalizedRoot)) continue;
+    seenRoots.add(normalizedRoot);
+
+    if (!(await isValidDirectory(normalizedRoot))) {
+      continue;
+    }
+
+    await collectWorkspaceSuggestions(normalizedRoot, root.label, results);
+  }
+
+  return Array.from(results.values()).sort((a, b) => {
+    if (b.skillCount !== a.skillCount) {
+      return b.skillCount - a.skillCount;
+    }
+    return a.workspaceDir.localeCompare(b.workspaceDir);
+  });
+}
+
+/**
  * Check if a directory exists and is readable.
  */
 export async function isValidDirectory(dir: string): Promise<boolean> {
@@ -313,6 +362,74 @@ export async function isValidDirectory(dir: string): Promise<boolean> {
     return s.isDirectory();
   } catch {
     return false;
+  }
+}
+
+const MAX_SCAN_DEPTH = 2;
+const MAX_SCANNED_DIRECTORIES_PER_ROOT = 80;
+
+async function collectWorkspaceSuggestions(
+  rootDir: string,
+  rootLabel: string,
+  results: Map<string, WorkspaceSuggestion>,
+): Promise<void> {
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: rootDir, depth: 0 }];
+  const visited = new Set<string>();
+  let scanned = 0;
+
+  while (queue.length > 0 && scanned < MAX_SCANNED_DIRECTORIES_PER_ROOT) {
+    const current = queue.shift();
+    if (!current) break;
+
+    const normalizedDir = normalizePath(current.dir);
+    if (visited.has(normalizedDir)) continue;
+    visited.add(normalizedDir);
+    scanned += 1;
+
+    const detected = await scanForSkillDirs(normalizedDir);
+    if (detected.length > 0) {
+      const manifestPath = path.join(normalizedDir, 'ahub.workspace.json');
+      const manifestExists = (await findWorkspaceManifestInDirectory(normalizedDir)) !== null;
+      const skillCount = detected.reduce((sum, entry) => sum + entry.skillCount, 0);
+      const relativeDir = path.relative(rootDir, normalizedDir);
+      const label = relativeDir
+        ? `${rootLabel} / ${relativeDir}`
+        : rootLabel;
+
+      results.set(normalizedDir, {
+        workspaceDir: normalizedDir,
+        label,
+        manifestPath,
+        manifestExists,
+        skillCount,
+        detected,
+      });
+    }
+
+    if (current.depth >= MAX_SCAN_DEPTH) {
+      continue;
+    }
+
+    let children;
+    try {
+      children = await readdir(normalizedDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const nextDirectories = children
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => !SKIP_DIRS.has(name))
+      .filter((name) => !name.startsWith('.'))
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const name of nextDirectories) {
+      queue.push({
+        dir: path.join(normalizedDir, name),
+        depth: current.depth + 1,
+      });
+    }
   }
 }
 

@@ -195,6 +195,15 @@ export interface WorkspaceRegistryEntry {
   error?: string;
 }
 
+export interface WorkspaceSuggestion {
+  workspaceDir: string;
+  label: string;
+  manifestPath: string;
+  manifestExists: boolean;
+  skillCount: number;
+  detected: DetectedSkillDir[];
+}
+
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------

@@ -18,9 +18,9 @@ interface WorkspaceFormProps {
 }
 
 const SOURCE_LABELS: Record<DeployTargetDirectory['source'], string> = {
-  'workspace-local': 'Project convention',
-  'config-override': 'Global override',
-  'tool-default': 'Tool default',
+  'workspace-local': 'Padrao do workspace',
+  'config-override': 'Override global',
+  'tool-default': 'Padrao da ferramenta',
 };
 
 export function WorkspaceForm({
@@ -60,8 +60,8 @@ export function WorkspaceForm({
     saveMutation.mutate(
       { filePath, manifest: updated },
       {
-        onSuccess: () => toast.success('Workspace profile saved'),
-        onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not save the workspace profile'),
+        onSuccess: () => toast.success('Workspace salvo'),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel salvar o workspace'),
       },
     );
   }, [name, description, defaultTargets, skills, manifest.groups, manifest.profile, filePath, saveMutation]);
@@ -82,7 +82,7 @@ export function WorkspaceForm({
     const trimmed = newSkillName.trim();
     if (!trimmed) return;
     if (skills.some((s) => s.name === trimmed)) {
-      toast.error(`Skill "${trimmed}" already in list`);
+      toast.error(`A skill "${trimmed}" ja esta na lista`);
       return;
     }
     setSkills([...skills, { name: trimmed }]);
@@ -108,47 +108,49 @@ export function WorkspaceForm({
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-gray-700">Project Sync Profile</h3>
+        <h3 className="text-sm font-semibold text-gray-700">Workspace settings</h3>
         <p className="mt-1 text-sm text-gray-500">
-          Agent Hub stores this project's sync profile in the{' '}
+          Use qualquer nome util para localizar este workspace depois, como{' '}
+          <span className="font-medium text-gray-700">Projeto principal</span>. O Agent Hub guarda
+          esses dados no arquivo{' '}
           <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
             ahub.workspace.json
           </code>{' '}
-          file. This file is not the cloud storage itself. It only describes which skills should
-          be available in this project and which agents should receive them.
+          dentro da pasta do projeto. Esse arquivo nao e a nuvem de skills; ele so descreve o que
+          este workspace deve baixar e para quais agentes enviar.
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Project folder</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Pasta do workspace</p>
             <p className="mt-1 break-all font-mono text-xs text-gray-700">{workspaceDir}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Workspace file</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Arquivo interno</p>
             <p className="mt-1 break-all font-mono text-xs text-gray-700">{filePath}</p>
           </div>
         </div>
 
         <div className="mt-4">
-          <h4 className="text-sm font-semibold text-gray-700">Project details</h4>
+          <h4 className="text-sm font-semibold text-gray-700">Workspace details</h4>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Project name</label>
+            <label className="block text-sm font-medium text-gray-700">Workspace name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="my-project"
+              placeholder="Projeto principal"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Project description</label>
+            <label className="block text-sm font-medium text-gray-700">Workspace description</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Skills and prompts used in this project"
+              placeholder="Skills e prompts usados neste projeto"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
@@ -157,10 +159,10 @@ export function WorkspaceForm({
         <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h4 className="text-sm font-semibold text-gray-700">Recognized agent folders</h4>
+              <h4 className="text-sm font-semibold text-gray-700">Pastas reconhecidas pelos agentes</h4>
               <p className="mt-1 text-sm text-gray-500">
-                Sync uses these directories so Codex, Claude Code and Cursor can read the files
-                directly in this project or through a global override.
+                O sync usa estas pastas para que Codex, Claude Code e Cursor reconhecam os arquivos
+                deste workspace seguindo o padrao esperado por cada aplicativo.
               </p>
             </div>
           </div>
@@ -174,23 +176,23 @@ export function WorkspaceForm({
                   </span>
                 </div>
                 <p className="mt-2 text-xs text-gray-500">
-                  {directory.exists ? 'Folder found on disk' : 'Folder will be created on first sync'}
+                  {directory.exists ? 'Pasta encontrada no disco' : 'Sera criada no primeiro sync'}
                 </p>
                 <div className="mt-3 space-y-2 text-xs text-gray-600">
                   <div>
-                    <p className="font-medium text-gray-700">Root</p>
+                    <p className="font-medium text-gray-700">Raiz</p>
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.rootPath}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-gray-700">Skill folder</p>
+                    <p className="font-medium text-gray-700">Pasta de skills</p>
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.skill}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-gray-700">Prompt folder</p>
+                    <p className="font-medium text-gray-700">Pasta de prompts</p>
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.prompt}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-gray-700">Subagent folder</p>
+                    <p className="font-medium text-gray-700">Pasta de subagents</p>
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.subagent}</p>
                   </div>
                 </div>
@@ -198,8 +200,7 @@ export function WorkspaceForm({
             ))}
             {resolvedTargetDirectories.length === 0 && (
               <div className="rounded-lg border border-dashed border-gray-200 bg-white p-4 text-sm text-gray-500 sm:col-span-3">
-                Agent Hub will show the recognized folders for this project after the workspace
-                data is fully loaded.
+                O Agent Hub vai mostrar essas pastas assim que os dados do workspace forem carregados.
               </div>
             )}
           </div>
@@ -209,8 +210,8 @@ export function WorkspaceForm({
           <TargetSelector
             selected={defaultTargets}
             onChange={setDefaultTargets}
-            label="Agents to sync for this project"
-            description="Choose which agent environments should receive this project's skills by default."
+            label="Agentes padrao deste workspace"
+            description="Escolha para quais aplicativos as skills deste workspace devem ser enviadas por padrao."
           />
         </div>
       </div>
@@ -218,13 +219,13 @@ export function WorkspaceForm({
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-700">
-            Skills for this project ({skills.length})
+            Skills deste workspace ({skills.length})
           </h3>
-          <span className="text-xs text-gray-400">Ctrl+S to save the workspace profile</span>
+          <span className="text-xs text-gray-400">Ctrl+S para salvar</span>
         </div>
         <p className="mt-1 text-sm text-gray-500">
-          List the skills that should be downloaded and synced for this project. A new project can
-          start empty and receive skills later.
+          Liste aqui as skills que este workspace deve baixar e sincronizar. Um projeto novo pode
+          ficar vazio agora e receber skills depois.
         </p>
 
         {skills.length > 0 && (
