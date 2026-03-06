@@ -30,12 +30,12 @@ export function WorkspaceSelector() {
   const displayName = activeEntry?.manifest?.name
     ?? (activeEntry?.workspaceDir
       ? basename(activeEntry.workspaceDir)
-      : 'No workspace');
+      : 'Nenhum workspace');
 
   const handleSwitch = (filePath: string) => {
     setActive.mutate(filePath, {
-      onSuccess: () => toast.success('Active project changed'),
-      onError: (err) => toast.error(err instanceof Error ? err.message : 'Switch failed'),
+      onSuccess: () => toast.success('Workspace ativo atualizado'),
+      onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel trocar o workspace'),
     });
     setOpen(false);
   };
@@ -43,8 +43,8 @@ export function WorkspaceSelector() {
   const handleUnregister = (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
     unregister.mutate(filePath, {
-      onSuccess: () => toast.success('Project workspace removed'),
-      onError: (err) => toast.error(err instanceof Error ? err.message : 'Remove failed'),
+      onSuccess: () => toast.success('Workspace removido da lista'),
+      onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel remover o workspace'),
     });
   };
 
@@ -95,7 +95,7 @@ export function WorkspaceSelector() {
                         </span>
                         {entry.error && (
                           <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
-                            error
+                            erro
                           </span>
                         )}
                       </div>
@@ -107,7 +107,7 @@ export function WorkspaceSelector() {
                     <button
                       onClick={(e) => handleUnregister(e, entry.filePath)}
                       className="rounded p-1 text-gray-300 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                      title="Remove workspace"
+                      title="Remover workspace"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -117,7 +117,7 @@ export function WorkspaceSelector() {
             </div>
           ) : (
             <div className="px-4 py-3 text-center text-sm text-gray-500">
-              No project workspaces registered
+              Nenhum workspace cadastrado
             </div>
           )}
 
@@ -130,7 +130,7 @@ export function WorkspaceSelector() {
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
             >
               <Plus className="h-4 w-4" />
-              Add Project Workspace...
+              Novo workspace...
             </button>
           </div>
         </div>

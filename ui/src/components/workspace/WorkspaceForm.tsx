@@ -3,6 +3,7 @@ import { Save, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSaveWorkspace } from '../../hooks/useWorkspace';
 import { TargetSelector } from '../deploy/TargetSelector';
+import { HoverHint } from '../shared/HoverHint';
 import type {
   DeployTarget,
   DeployTargetDirectory,
@@ -108,17 +109,10 @@ export function WorkspaceForm({
   return (
     <div className="space-y-5">
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-gray-700">Workspace settings</h3>
-        <p className="mt-1 text-sm text-gray-500">
-          Use qualquer nome util para localizar este workspace depois, como{' '}
-          <span className="font-medium text-gray-700">Projeto principal</span>. O Agent Hub guarda
-          esses dados no arquivo{' '}
-          <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
-            ahub.workspace.json
-          </code>{' '}
-          dentro da pasta do projeto. Esse arquivo nao e a nuvem de skills; ele so descreve o que
-          este workspace deve baixar e para quais agentes enviar.
-        </p>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-gray-700">Configuracao do workspace</h3>
+          <HoverHint text="O Agent Hub guarda estas informacoes no arquivo interno ahub.workspace.json. Esse arquivo nao e a nuvem de skills; ele apenas descreve o que este projeto deve baixar e para onde enviar." />
+        </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Pasta do workspace</p>
@@ -130,12 +124,12 @@ export function WorkspaceForm({
           </div>
         </div>
 
-        <div className="mt-4">
-          <h4 className="text-sm font-semibold text-gray-700">Workspace details</h4>
-        </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Workspace name</label>
+            <label className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700">
+              Nome de exibicao
+              <HoverHint text="Use um nome facil de localizar na lista, como Projeto principal ou Cliente A." />
+            </label>
             <input
               type="text"
               value={name}
@@ -145,7 +139,10 @@ export function WorkspaceForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Workspace description</label>
+            <label className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700">
+              Descricao
+              <HoverHint text="Use esta descricao para lembrar o que este projeto sincroniza ou qual contexto ele atende." />
+            </label>
             <input
               type="text"
               value={description}
@@ -159,11 +156,10 @@ export function WorkspaceForm({
         <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h4 className="text-sm font-semibold text-gray-700">Pastas reconhecidas pelos agentes</h4>
-              <p className="mt-1 text-sm text-gray-500">
-                O sync usa estas pastas para que Codex, Claude Code e Cursor reconhecam os arquivos
-                deste workspace seguindo o padrao esperado por cada aplicativo.
-              </p>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-semibold text-gray-700">Pastas reconhecidas pelos agentes</h4>
+                <HoverHint text="Estas sao as pastas que Codex, Claude Code e Cursor vao observar neste workspace. O sync usa esses caminhos para que as skills fiquem disponiveis dentro do aplicativo." />
+              </div>
             </div>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -212,21 +208,23 @@ export function WorkspaceForm({
             onChange={setDefaultTargets}
             label="Agentes padrao deste workspace"
             description="Escolha para quais aplicativos as skills deste workspace devem ser enviadas por padrao."
+            labelAddon={
+              <HoverHint text="Se uma skill nao tiver destino proprio, ela usara estes agentes como padrao." />
+            }
           />
         </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-700">
-            Skills deste workspace ({skills.length})
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-gray-700">
+              Skills deste workspace ({skills.length})
+            </h3>
+            <HoverHint text="Somente as skills listadas aqui entram no sync deste workspace. Se a lista estiver vazia, o projeto continua valido e pode receber skills depois." />
+          </div>
           <span className="text-xs text-gray-400">Ctrl+S para salvar</span>
         </div>
-        <p className="mt-1 text-sm text-gray-500">
-          Liste aqui as skills que este workspace deve baixar e sincronizar. Um projeto novo pode
-          ficar vazio agora e receber skills depois.
-        </p>
 
         {skills.length > 0 && (
           <div className="mt-3 divide-y divide-gray-100">
@@ -258,7 +256,7 @@ export function WorkspaceForm({
                                 : 'border border-cyan-300 bg-cyan-50 text-cyan-700'
                             : 'border border-gray-200 bg-white text-gray-400'
                         }`}
-                        title={isDefault ? 'Inherited from project defaults' : `Toggle ${t}`}
+                        title={isDefault ? 'Herdado dos agentes padrao' : `Alternar ${t}`}
                       >
                         {t === 'claude-code' ? 'CC' : t === 'codex' ? 'CX' : 'CR'}
                       </button>

@@ -189,7 +189,7 @@ export function WorkspacePage() {
       <section className="rounded-2xl border border-gray-200 bg-white p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-2xl font-semibold text-gray-900">Workspace manager</h1>
+            <h1 className="text-2xl font-semibold text-gray-900">Gerenciar workspaces</h1>
             <p className="mt-2 text-sm text-gray-500">
               Cadastre, nomeie e organize varios workspaces locais. Qualquer pasta pode virar um
               workspace, mas skills e prompts so aparecem aqui quando a pasta entra nesta lista.

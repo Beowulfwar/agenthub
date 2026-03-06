@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import type { DeployTarget } from '../../api/types';
 
@@ -5,6 +6,7 @@ interface TargetSelectorProps {
   selected: DeployTarget[];
   onChange: (targets: DeployTarget[]) => void;
   label?: string;
+  labelAddon?: ReactNode;
   description?: string;
 }
 
@@ -18,6 +20,7 @@ export function TargetSelector({
   selected,
   onChange,
   label = 'Agent destinations',
+  labelAddon,
   description,
 }: TargetSelectorProps) {
   const toggle = (target: DeployTarget) => {
@@ -30,7 +33,10 @@ export function TargetSelector({
 
   return (
     <div>
-      <label className="text-sm font-medium text-gray-700">{label}</label>
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium text-gray-700">{label}</label>
+        {labelAddon}
+      </div>
       {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
       <div className="mt-2 flex gap-2">
         {TARGETS.map(({ value, label, color }) => (

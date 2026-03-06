@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { X, FolderPlus, ExternalLink, Loader2, FolderSearch } from 'lucide-react';
+import { X, FolderPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRegisterWorkspace } from '../../hooks/useWorkspace';
-import { pickNativeDirectory } from '../../api/client';
+import { HoverHint } from '../shared/HoverHint';
 import { DirectoryBrowser } from './DirectoryBrowser';
 
 interface CreateWorkspaceDialogProps {
@@ -18,24 +18,7 @@ export function CreateWorkspaceDialog({
 }: CreateWorkspaceDialogProps) {
   const [directory, setDirectory] = useState(initialDirectory);
   const [name, setName] = useState(initialName);
-  const [pickingDirectory, setPickingDirectory] = useState(false);
-  const [showBrowser, setShowBrowser] = useState(false);
   const registerMutation = useRegisterWorkspace();
-
-  const openSystemPicker = async () => {
-    setPickingDirectory(true);
-
-    try {
-      const { selectedDir } = await pickNativeDirectory(directory.trim() || undefined);
-      if (selectedDir) {
-        setDirectory(selectedDir);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Nao foi possivel abrir o explorador do sistema');
-    } finally {
-      setPickingDirectory(false);
-    }
-  };
 
   const handleSubmit = () => {
     const trimmedDirectory = directory.trim();
@@ -63,16 +46,12 @@ export function CreateWorkspaceDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-4">
-          <div>
+          <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-gray-900">Novo workspace</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Qualquer pasta pode ser um workspace. Se o arquivo{' '}
-              <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
-                ahub.workspace.json
-              </code>{' '}
-              ainda nao existir, o Agent Hub cria esse perfil automaticamente.
+              Escolha uma pasta e, se quiser, defina um nome facil de localizar depois.
             </p>
           </div>
           <button onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
@@ -80,79 +59,60 @@ export function CreateWorkspaceDialog({
           </button>
         </div>
 
-        <div className="mt-5 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Nome do workspace <span className="text-gray-400">(opcional)</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Projeto principal"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              Esse nome facilita a busca quando voce tiver muitos workspaces na maquina.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Pasta do workspace</label>
-            <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+        <div className="mt-5 grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <section className="space-y-4">
+            <div>
+              <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
+                Nome de exibicao <span className="text-gray-400">(opcional)</span>
+                <HoverHint text="Use um nome generico, como Projeto principal, para facilitar a busca quando houver muitos workspaces." />
+              </label>
               <input
                 type="text"
-                value={directory}
-                onChange={(e) => setDirectory(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                placeholder="/caminho/do/projeto"
-                className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Projeto principal"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
               />
-              <button
-                type="button"
-                onClick={openSystemPicker}
-                disabled={pickingDirectory}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {pickingDirectory ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ExternalLink className="h-4 w-4" />
-                )}
-                Explorador do sistema
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowBrowser((value) => !value)}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <FolderSearch className="h-4 w-4" />
-                {showBrowser ? 'Ocultar navegador' : 'Navegar aqui'}
-              </button>
             </div>
-            <p className="mt-1 text-xs text-gray-400">
-              O cadastro e sempre feito pela pasta. Skills so aparecem na tela depois que o workspace entra nesta lista.
-            </p>
-          </div>
 
-          {directory.trim() && (
+            <div>
+              <div className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
+                Pasta selecionada
+                <HoverHint text="O workspace sempre e cadastrado pela pasta do projeto. O arquivo interno ahub.workspace.json e criado automaticamente quando faltar." />
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Caminho escolhido
+                </p>
+                <p className="mt-1 break-all font-mono text-xs text-gray-700">
+                  {directory || 'Nenhuma pasta selecionada ainda'}
+                </p>
+              </div>
+            </div>
+
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Workspace selecionado</p>
-              <p className="mt-1 break-all font-mono text-xs text-gray-700">{directory}</p>
+              <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                Como funciona
+                <HoverHint text="Navegue pelas pastas ao lado, entre no projeto desejado e clique em Selecionar esta pasta. Nao e necessario digitar caminhos." />
+              </div>
+              <p className="mt-2 text-sm text-gray-500">
+                O cadastro e feito pela navegacao visual. As skills desse projeto so entram no
+                gerenciamento depois que este workspace for salvo.
+              </p>
             </div>
-          )}
+          </section>
 
-          {showBrowser && (
-            <div className="rounded-xl border border-gray-200 p-4">
-              <DirectoryBrowser
-                onSelect={(dir) => {
-                  setDirectory(dir);
-                  setShowBrowser(false);
-                }}
-                onCancel={() => setShowBrowser(false)}
-              />
+          <section className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">Selecionar pasta</h3>
+              <HoverHint text="Este navegador mostra locais sugeridos primeiro. Depois voce pode navegar pelas subpastas ate chegar ao projeto." />
             </div>
-          )}
+            <DirectoryBrowser
+              initialDir={initialDirectory}
+              selectedDir={directory}
+              onSelect={(dir) => setDirectory(dir)}
+            />
+          </section>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -167,12 +127,8 @@ export function CreateWorkspaceDialog({
             disabled={registerMutation.isPending || !directory.trim()}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
-            {registerMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FolderPlus className="h-4 w-4" />
-            )}
-            Adicionar workspace
+            <FolderPlus className="h-4 w-4" />
+            {registerMutation.isPending ? 'Salvando...' : 'Adicionar workspace'}
           </button>
         </div>
       </div>

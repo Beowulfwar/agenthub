@@ -32,7 +32,9 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 6. A UI deve explicitar o diretorio do projeto e esconder o conceito de manifest como detalhe de implementacao, sempre que possivel.
 7. Para cada target suportado, a UI deve mostrar o diretorio reconhecido que sera usado pelo sync.
 8. Quando nao houver workspaces cadastrados, a UI deve sugerir pastas a partir de skills locais encontradas em estruturas conhecidas como `.skills`, `.codex`, `.claude` e `.cursor`.
-9. Precedencia de diretorio de deploy por target:
+9. O fluxo de selecao de pasta deve ser guiado por navegacao visual e sugestoes; a UI nao deve depender de digitacao manual de caminhos.
+10. Campos que exigem contexto extra devem usar ajuda contextual discreta (tooltip/hover hint), em vez de espalhar textos longos pela tela.
+11. Precedencia de diretorio de deploy por target:
    - `config.deployTargets[target]`
    - raiz local do workspace ativo (ex.: `project/.codex`)
    - padrao nativo da ferramenta quando nao houver workspace selecionado
@@ -63,6 +65,12 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 - **When**: O usuario ainda nao cadastrou workspaces e abre `/workspace`
 - **Then**: O sistema sugere o diretorio raiz do projeto como workspace inicial, nunca apenas a subpasta de skills
 
+### Cenario: Selecao guiada sem digitar caminho
+
+- **Given**: O usuario abre o modal `Novo workspace`
+- **When**: Escolhe uma pasta navegando pelas sugestoes e subpastas
+- **Then**: O caminho aparece apenas como texto de confirmacao, sem exigir digitacao manual
+
 ### Cenario: Skills visiveis apenas para workspaces cadastrados
 
 - **Given**: Existe um projeto local com skills, mas ele nao foi cadastrado
@@ -89,6 +97,8 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 | CRUD explicito na tela `/workspace` | Facilita consulta, busca e manutencao quando houver muitos projetos |
 | `ahub.workspace.json` continua existindo | Mantem rastreabilidade e reabertura consistente do projeto |
 | Sugestoes por skills detectadas | Acelera o primeiro cadastro sem obrigar o usuario a conhecer a estrutura interna |
+| Selecao guiada sem input de caminho | Reduz erro de digitacao e elimina dois fluxos concorrentes para o mesmo objetivo |
+| Tooltip curto ao lado dos campos | Mantem a interface legivel sem perder contexto operacional |
 | Diretorios por agente visiveis na UI | Garante que o usuario entenda onde Codex/Claude/Cursor vao ler os arquivos |
 | Paths locais por workspace como padrao | Evita misturar skills de projetos diferentes no mesmo diretorio global |
 
@@ -98,3 +108,4 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 |------|---------|
 | 2026-03-06 | Spec criada para formalizar workspaces multi-projeto e diretorios reconhecidos por agente |
 | 2026-03-06 | Atualizada para refletir CRUD de multiplos workspaces, sugestoes por skills detectadas e exibicao restrita a workspaces cadastrados |
+| 2026-03-06 | Atualizada para modal unico de selecao, navegacao sem digitacao manual e ajuda contextual por hover |
