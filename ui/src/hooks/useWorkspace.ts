@@ -45,8 +45,12 @@ export function useWorkspaceRegistry() {
 export function useRegisterWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ filePath, create }: { filePath: string; create?: boolean }) =>
-      registerWorkspaceApi(filePath, create),
+    mutationFn: (params: {
+      filePath?: string;
+      directory?: string;
+      create?: boolean;
+      name?: string;
+    }) => registerWorkspaceApi(params),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });

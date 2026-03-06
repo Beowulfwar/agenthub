@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { X, FolderPlus, FolderOpen, FolderSearch } from 'lucide-react';
+import { X, FolderPlus, FolderOpen, FolderSearch, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRegisterWorkspace } from '../../hooks/useWorkspace';
+import { pickNativeDirectory } from '../../api/client';
 import { cn } from '../../lib/utils';
 import { DirectoryBrowser } from './DirectoryBrowser';
 import type { DetectedSkillDir } from '../../api/types';
@@ -14,68 +15,90 @@ type Mode = 'browse' | 'register' | 'create';
 
 export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
   const [mode, setMode] = useState<Mode>('browse');
-  const [filePath, setFilePath] = useState('');
+  const [pathValue, setPathValue] = useState('');
   const [name, setName] = useState('');
+  const [pickingDirectory, setPickingDirectory] = useState(false);
   const registerMutation = useRegisterWorkspace();
 
   const handleBrowseSelect = (dir: string, detected: DetectedSkillDir[]) => {
-    setFilePath(dir);
+    setPathValue(dir);
+    setMode(detected.length > 0 ? 'create' : 'register');
 
-    if (detected.length > 0) {
-      // Auto-register with detected directory
-      handleRegister(dir, true);
-    } else {
-      // Switch to create mode for directory without known skills
-      setMode('create');
+    toast.info(
+      detected.length > 0
+        ? 'Directory selected. Review the folder and confirm if you want to use it as a workspace.'
+        : 'Directory selected. Confirm the folder or switch to create a new workspace manifest.',
+    );
+  };
+
+  const openSystemPicker = async () => {
+    setPickingDirectory(true);
+
+    try {
+      const { selectedDir } = await pickNativeDirectory(pathValue.trim() || undefined);
+      if (selectedDir) {
+        setPathValue(selectedDir);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the system folder picker');
+    } finally {
+      setPickingDirectory(false);
     }
   };
 
-  const handleRegister = (pathOverride?: string, create?: boolean) => {
-    const targetPath = pathOverride ?? filePath.trim();
-    if (!targetPath) {
-      toast.error('Path cannot be empty');
+  const handleRegister = () => {
+    const rawPath = pathValue.trim();
+    if (!rawPath) {
+      toast.error('Choose a project folder first');
       return;
     }
 
-    const isCreate = create ?? mode === 'create';
-    const finalPath = isCreate
-      ? targetPath.endsWith('.json')
-        ? targetPath
-        : `${targetPath.replace(/\/+$/, '')}/ahub.workspace.json`
-      : targetPath;
+    const payload = rawPath.endsWith('.json')
+      ? {
+          filePath: rawPath,
+          create: mode === 'create',
+          name: name.trim() || undefined,
+        }
+      : {
+          directory: rawPath,
+          create: mode === 'create',
+          name: name.trim() || undefined,
+        };
 
-    registerMutation.mutate(
-      { filePath: finalPath, create: isCreate },
-      {
-        onSuccess: () => {
-          toast.success(
-            isCreate
-              ? 'Workspace created and registered'
-              : 'Workspace registered',
-          );
-          onClose();
-        },
-        onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Operation failed');
-        },
+    registerMutation.mutate(payload, {
+      onSuccess: ({ created }) => {
+        toast.success(
+          created
+            ? 'Workspace manifest created for the selected folder'
+            : 'Workspace loaded from the selected folder',
+        );
+        onClose();
       },
-    );
+      onError: (err) => {
+        toast.error(err instanceof Error ? err.message : 'Could not prepare the workspace');
+      },
+    });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Register Workspace
-          </h2>
+      <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Choose Workspace Folder</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Pick the project folder first. Then Agent Hub will load the nearest{' '}
+              <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
+                ahub.workspace.json
+              </code>{' '}
+              or create one in that folder.
+            </p>
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Mode toggle */}
         <div className="mt-4 flex gap-1 rounded-lg bg-gray-100 p-1">
           <button
             onClick={() => setMode('browse')}
@@ -87,7 +110,7 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
             )}
           >
             <FolderSearch className="h-4 w-4" />
-            Browse
+            Explore folders
           </button>
           <button
             onClick={() => setMode('register')}
@@ -99,7 +122,7 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
             )}
           >
             <FolderOpen className="h-4 w-4" />
-            Existing
+            Use existing
           </button>
           <button
             onClick={() => setMode('create')}
@@ -115,36 +138,41 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
           </button>
         </div>
 
-        {/* Content area */}
         <div className="mt-4">
           {mode === 'browse' ? (
-            <DirectoryBrowser
-              onSelect={handleBrowseSelect}
-              onCancel={onClose}
-            />
+            <DirectoryBrowser onSelect={handleBrowseSelect} onCancel={onClose} />
           ) : (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  {mode === 'register' ? 'Manifest file path' : 'Project directory'}
-                </label>
-                <input
-                  type="text"
-                  value={filePath}
-                  onChange={(e) => setFilePath(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
-                  autoFocus
-                  placeholder={
-                    mode === 'register'
-                      ? '/path/to/project/ahub.workspace.json'
-                      : '/path/to/project'
-                  }
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                />
+                <label className="block text-sm font-medium text-gray-700">Project folder</label>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    type="text"
+                    value={pathValue}
+                    onChange={(e) => setPathValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+                    autoFocus
+                    placeholder="/path/to/project"
+                    className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={openSystemPicker}
+                    disabled={pickingDirectory}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pickingDirectory ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-4 w-4" />
+                    )}
+                    Browse...
+                  </button>
+                </div>
                 <p className="mt-1 text-xs text-gray-400">
                   {mode === 'register'
-                    ? 'Path to an existing ahub.workspace.json or .ahub.json'
-                    : 'A new ahub.workspace.json will be created in this directory'}
+                    ? 'Choose the project folder that already has a workspace manifest. You can also paste the full path to ahub.workspace.json.'
+                    : 'Choose the project folder that should become your workspace. If a manifest already exists, it will be reused.'}
                 </p>
               </div>
 
@@ -163,7 +191,15 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
                 </div>
               )}
 
-              {/* Actions */}
+              {pathValue.trim() && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                    Selected folder
+                  </p>
+                  <p className="mt-1 break-all font-mono text-xs text-gray-700">{pathValue}</p>
+                </div>
+              )}
+
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   onClick={onClose}
@@ -172,21 +208,18 @@ export function CreateWorkspaceDialog({ onClose }: CreateWorkspaceDialogProps) {
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleRegister()}
-                  disabled={registerMutation.isPending || !filePath.trim()}
+                  onClick={handleRegister}
+                  disabled={registerMutation.isPending || !pathValue.trim()}
                   className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                 >
-                  {mode === 'register' ? (
-                    <>
-                      <FolderOpen className="h-4 w-4" />
-                      {registerMutation.isPending ? 'Registering...' : 'Register'}
-                    </>
+                  {registerMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : mode === 'register' ? (
+                    <FolderOpen className="h-4 w-4" />
                   ) : (
-                    <>
-                      <FolderPlus className="h-4 w-4" />
-                      {registerMutation.isPending ? 'Creating...' : 'Create'}
-                    </>
+                    <FolderPlus className="h-4 w-4" />
                   )}
+                  {mode === 'register' ? 'Load workspace' : 'Use this folder'}
                 </button>
               </div>
             </div>

@@ -21,6 +21,7 @@ import type {
   BrowseResult,
   ScanResult,
   SuggestionDir,
+  PickDirectoryResult,
   AhubConfig,
   ApiSuccess,
 } from './types';
@@ -118,12 +119,14 @@ export async function fetchWorkspaceRegistry(): Promise<WorkspaceRegistryEntry[]
 }
 
 export async function registerWorkspaceApi(
-  filePath: string,
-  create?: boolean,
-): Promise<{ registered: string }> {
-  return unwrap(
-    await api.post<ApiSuccess<{ registered: string }>>('/workspace/registry', { filePath, create }),
-  );
+  body: {
+    filePath?: string;
+    directory?: string;
+    create?: boolean;
+    name?: string;
+  },
+): Promise<{ registered: string; created: boolean }> {
+  return unwrap(await api.post<ApiSuccess<{ registered: string; created: boolean }>>('/workspace/registry', body));
 }
 
 export async function unregisterWorkspaceApi(filePath: string): Promise<{ unregistered: string }> {
@@ -156,6 +159,10 @@ export async function scanSkillDirs(dir: string): Promise<ScanResult> {
 
 export async function fetchSuggestions(): Promise<SuggestionDir[]> {
   return unwrap(await api.get<ApiSuccess<SuggestionDir[]>>('/explorer/suggestions'));
+}
+
+export async function pickNativeDirectory(initialDir?: string): Promise<PickDirectoryResult> {
+  return unwrap(await api.post<ApiSuccess<PickDirectoryResult>>('/explorer/pick-directory', { initialDir }));
 }
 
 // ---------------------------------------------------------------------------

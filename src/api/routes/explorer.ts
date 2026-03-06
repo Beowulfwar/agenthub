@@ -13,8 +13,9 @@ import {
   listDirectory,
   suggestStartDirs,
   isValidDirectory,
+  pickDirectory,
 } from '../../core/explorer.js';
-import { normalizePath } from '../../core/wsl.js';
+import { normalizeExternalPath } from '../../core/wsl.js';
 
 export function explorerRoutes(): Hono {
   const app = new Hono();
@@ -23,7 +24,7 @@ export function explorerRoutes(): Hono {
   app.get('/browse', async (c) => {
     const dir = c.req.query('dir') || os.homedir();
     const showHidden = c.req.query('hidden') !== 'false';
-    const normalized = normalizePath(dir);
+    const normalized = await normalizeExternalPath(dir);
 
     if (!(await isValidDirectory(normalized))) {
       return c.json({ error: { code: 'INVALID_DIR', message: `Not a valid directory: ${dir}` } }, 400);
@@ -41,7 +42,7 @@ export function explorerRoutes(): Hono {
   // GET /api/explorer/scan?dir=/path
   app.get('/scan', async (c) => {
     const dir = c.req.query('dir') || os.homedir();
-    const normalized = normalizePath(dir);
+    const normalized = await normalizeExternalPath(dir);
 
     if (!(await isValidDirectory(normalized))) {
       return c.json({ error: { code: 'INVALID_DIR', message: `Not a valid directory: ${dir}` } }, 400);
@@ -77,6 +78,13 @@ export function explorerRoutes(): Hono {
     }
 
     return c.json({ data: results });
+  });
+
+  // POST /api/explorer/pick-directory
+  app.post('/pick-directory', async (c) => {
+    const body = await c.req.json<{ initialDir?: string }>().catch(() => ({ initialDir: undefined }));
+    const selectedDir = await pickDirectory(body.initialDir);
+    return c.json({ data: { selectedDir } });
   });
 
   return app;

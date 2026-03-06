@@ -5,13 +5,13 @@ import {
   ChevronRight,
   ArrowUp,
   Loader2,
-  Search,
   Sparkles,
   Check,
   Home,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { browseDirectory, scanSkillDirs, fetchSuggestions } from '../../api/client';
+import { browseDirectory, scanSkillDirs, fetchSuggestions, pickNativeDirectory } from '../../api/client';
 import type { DirEntry, DetectedSkillDir, SuggestionDir } from '../../api/types';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,7 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
   const [manualPath, setManualPath] = useState('');
   const [phase, setPhase] = useState<'suggestions' | 'browsing'>('suggestions');
   const [error, setError] = useState('');
+  const [pickingNative, setPickingNative] = useState(false);
 
   // Load suggestions on mount
   useEffect(() => {
@@ -83,13 +84,14 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
       setScanning(true);
       const scanResult = await scanSkillDirs(result.currentDir);
       setDetected(scanResult.detected);
-      setScanning(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : `Cannot access: ${dir}`);
       setCurrentDir(dir);
       setEntries([]);
+    } finally {
+      setScanning(false);
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const goUp = () => {
@@ -108,6 +110,22 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
     }
   };
 
+  const handleNativePicker = useCallback(async () => {
+    setPickingNative(true);
+    setError('');
+
+    try {
+      const { selectedDir } = await pickNativeDirectory(currentDir || undefined);
+      if (selectedDir) {
+        await navigateTo(selectedDir);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot open the system folder picker');
+    } finally {
+      setPickingNative(false);
+    }
+  }, [currentDir, navigateTo]);
+
   // -----------------------------------------------------------------------
   // Phase 1: Suggestions (starting points)
   // -----------------------------------------------------------------------
@@ -118,6 +136,15 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
         <p className="text-sm text-gray-500">
           Select a directory to browse, or type a path below.
         </p>
+
+        <button
+          onClick={handleNativePicker}
+          disabled={pickingNative}
+          className="inline-flex w-fit items-center gap-2 rounded-lg border border-brand-300 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pickingNative ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+          Open system folder picker
+        </button>
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-8">
@@ -198,6 +225,14 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
     <div className="flex flex-col gap-3">
       {/* Current path + navigation */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={handleNativePicker}
+          title="Open the system folder picker"
+          disabled={pickingNative}
+          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pickingNative ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+        </button>
         <button
           onClick={() => { setPhase('suggestions'); setError(''); }}
           title="Back to suggestions"

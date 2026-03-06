@@ -5,8 +5,12 @@
  * and native Linux paths (/home/...) and detects the WSL environment.
  */
 
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // WSL detection
@@ -42,6 +46,7 @@ export function isWSL(): boolean {
  *   //wsl.localhost/Ubuntu/home/user/...
  */
 const WSL_UNC_REGEX = /^(?:\\\\|\/\/)wsl(?:\.localhost|\$)[/\\]([^/\\]+)[/\\]?(.*)?$/i;
+const WINDOWS_DRIVE_REGEX = /^[A-Za-z]:[\\/]/;
 
 /**
  * Convert a WSL UNC path to its native Linux equivalent.
@@ -83,6 +88,53 @@ export function normalizePath(inputPath: string): string {
   const resolved = resolveWSLPath(inputPath);
   // Ensure forward slashes
   return resolved.replace(/\\/g, '/');
+}
+
+/**
+ * Normalize a user-supplied path that may come from Windows while running in WSL.
+ * Converts Windows drive paths to their native Linux mount when possible.
+ */
+export async function normalizeExternalPath(inputPath: string): Promise<string> {
+  const trimmed = inputPath.trim();
+  if (!trimmed) return trimmed;
+
+  if (isWSL() && WINDOWS_DRIVE_REGEX.test(trimmed)) {
+    try {
+      const { stdout } = await execFileAsync('wslpath', ['-u', trimmed], {
+        encoding: 'utf-8',
+        windowsHide: true,
+      });
+      const converted = String(stdout).trim();
+      if (converted) {
+        return normalizePath(converted);
+      }
+    } catch {
+      // Fall through to basic normalization.
+    }
+  }
+
+  return normalizePath(trimmed);
+}
+
+/**
+ * Convert a native Linux/WSL path to a Windows path when running inside WSL.
+ * Returns null when conversion is unavailable.
+ */
+export async function toWindowsPath(inputPath: string): Promise<string | null> {
+  const trimmed = inputPath.trim();
+  if (!trimmed) return null;
+  if (!isWSL()) return null;
+
+  try {
+    const { stdout } = await execFileAsync('wslpath', ['-w', normalizePath(trimmed)], {
+      encoding: 'utf-8',
+      windowsHide: true,
+    });
+    const converted = String(stdout).trim();
+    return converted || null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

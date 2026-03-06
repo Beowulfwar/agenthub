@@ -125,6 +125,7 @@ agent-hub/
 ```bash
 npm install
 npm run dev -- list          # Rodar em modo dev
+npm run dev:stack            # Subir backend + frontend da UI
 npm run build                # Build TypeScript
 npm test                     # Rodar testes
 ```

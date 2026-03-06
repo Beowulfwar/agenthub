@@ -17,6 +17,7 @@ import {
   setActiveWorkspace,
 } from '../../core/config.js';
 import type { WorkspaceManifest, WorkspaceRegistryEntry } from '../../core/types.js';
+import { normalizeExternalPath } from '../../core/wsl.js';
 
 export function workspaceRoutes(): Hono {
   const app = new Hono();
@@ -56,38 +57,77 @@ export function workspaceRoutes(): Hono {
 
   // POST /api/workspace/registry — register (and optionally create) a workspace
   app.post('/registry', async (c) => {
-    const body = await c.req.json<{ filePath: string; create?: boolean }>();
-    const absPath = path.resolve(body.filePath);
+    const body = await c.req.json<{
+      filePath?: string;
+      directory?: string;
+      create?: boolean;
+      name?: string;
+    }>();
 
-    if (body.create) {
-      const manifest: WorkspaceManifest = {
-        version: 1,
-        name: path.basename(path.dirname(absPath)),
-        defaultTargets: ['claude-code'],
-        skills: [],
-      };
-      await saveWorkspaceManifest(absPath, manifest);
+    const fallbackName = body.name?.trim();
+    let manifestPath: string;
+    let created = false;
+
+    if (body.directory) {
+      const normalizedDir = await normalizeExternalPath(body.directory);
+      const absDir = path.resolve(normalizedDir);
+      const existingManifest = await findWorkspaceManifest(absDir);
+
+      if (existingManifest) {
+        manifestPath = existingManifest;
+      } else {
+        if (!body.create) {
+          throw new Error(`No workspace manifest found in "${absDir}".`);
+        }
+
+        manifestPath = path.join(absDir, 'ahub.workspace.json');
+        const manifest: WorkspaceManifest = {
+          version: 1,
+          name: fallbackName || path.basename(absDir),
+          defaultTargets: ['claude-code'],
+          skills: [],
+        };
+        await saveWorkspaceManifest(manifestPath, manifest);
+        created = true;
+      }
+    } else if (body.filePath) {
+      const normalizedFile = await normalizeExternalPath(body.filePath);
+      manifestPath = path.resolve(normalizedFile);
+
+      if (body.create) {
+        const manifest: WorkspaceManifest = {
+          version: 1,
+          name: fallbackName || path.basename(path.dirname(manifestPath)),
+          defaultTargets: ['claude-code'],
+          skills: [],
+        };
+        await saveWorkspaceManifest(manifestPath, manifest);
+        created = true;
+      } else {
+        await loadWorkspaceManifest(manifestPath);
+      }
     } else {
-      // Validate the manifest exists and is loadable
-      await loadWorkspaceManifest(absPath);
+      throw new Error('Either "directory" or "filePath" is required.');
     }
 
-    await registerWorkspace(absPath);
-    return c.json({ data: { registered: absPath } });
+    await registerWorkspace(manifestPath);
+    return c.json({ data: { registered: manifestPath, created } });
   });
 
   // DELETE /api/workspace/registry — unregister a workspace
   app.delete('/registry', async (c) => {
     const body = await c.req.json<{ filePath: string }>();
-    await unregisterWorkspace(body.filePath);
-    return c.json({ data: { unregistered: body.filePath } });
+    const normalizedFile = await normalizeExternalPath(body.filePath);
+    await unregisterWorkspace(normalizedFile);
+    return c.json({ data: { unregistered: normalizedFile } });
   });
 
   // PUT /api/workspace/active — set active workspace
   app.put('/active', async (c) => {
     const body = await c.req.json<{ filePath: string }>();
-    await setActiveWorkspace(body.filePath);
-    return c.json({ data: { active: body.filePath } });
+    const normalizedFile = await normalizeExternalPath(body.filePath);
+    await setActiveWorkspace(normalizedFile);
+    return c.json({ data: { active: normalizedFile } });
   });
 
   // -------------------------------------------------------------------------
@@ -100,7 +140,7 @@ export function workspaceRoutes(): Hono {
 
     let filePath: string | null;
     if (customPath) {
-      filePath = customPath;
+      filePath = await normalizeExternalPath(customPath);
     } else {
       // Check active workspace in registry first, then fall back to cwd walk
       const registry = await getWorkspaceRegistry();
@@ -141,9 +181,10 @@ export function workspaceRoutes(): Hono {
       manifest: WorkspaceManifest;
     }>();
 
-    await saveWorkspaceManifest(body.filePath, body.manifest);
+    const normalizedFile = await normalizeExternalPath(body.filePath);
+    await saveWorkspaceManifest(normalizedFile, body.manifest);
 
-    return c.json({ data: { saved: body.filePath } });
+    return c.json({ data: { saved: normalizedFile } });
   });
 
   return app;

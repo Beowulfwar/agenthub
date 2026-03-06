@@ -41,8 +41,8 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
     saveMutation.mutate(
       { filePath, manifest: updated },
       {
-        onSuccess: () => toast.success('Workspace saved'),
-        onError: (err) => toast.error(err instanceof Error ? err.message : 'Save failed'),
+        onSuccess: () => toast.success('Workspace manifest saved'),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not save the manifest'),
       },
     );
   }, [name, description, defaultTargets, skills, manifest.groups, manifest.profile, filePath, saveMutation]);
@@ -88,9 +88,23 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
 
   return (
     <div className="space-y-5">
-      {/* Meta fields */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-gray-700">General</h3>
+        <h3 className="text-sm font-semibold text-gray-700">Workspace Manifest</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          These fields edit the{' '}
+          <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-xs text-gray-700">
+            ahub.workspace.json
+          </code>{' '}
+          file for the selected working directory.
+        </p>
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Manifest path</p>
+          <p className="mt-1 break-all font-mono text-xs text-gray-700">{filePath}</p>
+        </div>
+
+        <div className="mt-4">
+          <h4 className="text-sm font-semibold text-gray-700">Manifest settings</h4>
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Name</label>
@@ -119,14 +133,16 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
         </div>
       </div>
 
-      {/* Skills list */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-700">
-            Skills ({skills.length})
+            Manifest Skills ({skills.length})
           </h3>
-          <span className="text-xs text-gray-400">Ctrl+S to save</span>
+          <span className="text-xs text-gray-400">Ctrl+S to save manifest</span>
         </div>
+        <p className="mt-1 text-sm text-gray-500">
+          This list defines which skills belong to the selected workspace manifest.
+        </p>
 
         {skills.length > 0 && (
           <div className="mt-3 divide-y divide-gray-100">
@@ -226,7 +242,6 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
         </div>
       )}
 
-      {/* Save button */}
       <div className="flex justify-end">
         <button
           onClick={handleSave}
@@ -234,7 +249,7 @@ export function WorkspaceForm({ manifest, filePath }: WorkspaceFormProps) {
           className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           <Save className="h-4 w-4" />
-          {saveMutation.isPending ? 'Saving...' : 'Save Workspace'}
+          {saveMutation.isPending ? 'Saving...' : 'Save Manifest'}
         </button>
       </div>
     </div>

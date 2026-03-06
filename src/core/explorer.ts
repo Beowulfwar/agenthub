@@ -8,9 +8,13 @@
 import { access, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-import { normalizePath } from './wsl.js';
+import { isWSL, normalizeExternalPath, normalizePath, toWindowsPath } from './wsl.js';
 import { ALL_MARKER_FILES } from './types.js';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Well-known skill directory patterns
@@ -310,4 +314,113 @@ export async function isValidDirectory(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Native directory picker
+// ---------------------------------------------------------------------------
+
+function escapePowerShellString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function isCancelledPickerError(err: unknown): boolean {
+  const code = (err as { code?: string | number } | null)?.code;
+  return code === 1 || code === '1';
+}
+
+async function runPickerCommand(cmd: string, args: string[]): Promise<string | null | undefined> {
+  try {
+    const { stdout } = await execFileAsync(cmd, args, {
+      encoding: 'utf-8',
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    const selected = String(stdout).trim();
+    return selected || null;
+  } catch (err) {
+    const code = (err as { code?: string | number } | null)?.code;
+    if (code === 'ENOENT') return undefined;
+    if (isCancelledPickerError(err)) return null;
+    throw err;
+  }
+}
+
+async function pickDirectoryWithPowerShell(initialDir?: string): Promise<string | null> {
+  const selectedPath = initialDir ? escapePowerShellString(initialDir) : '';
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$dialog.Description = 'Select a workspace folder'",
+    '$dialog.ShowNewFolderButton = $true',
+    selectedPath ? `$dialog.SelectedPath = '${selectedPath}'` : '',
+    '$result = $dialog.ShowDialog()',
+    'if ($result -eq [System.Windows.Forms.DialogResult]::OK) {',
+    '  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    '  Write-Output $dialog.SelectedPath',
+    '}',
+  ].filter(Boolean).join('; ');
+
+  const selected = await runPickerCommand('powershell.exe', ['-NoProfile', '-STA', '-Command', script]);
+  return selected ?? null;
+}
+
+async function pickDirectoryWithAppleScript(initialDir?: string): Promise<string | null | undefined> {
+  const script = initialDir
+    ? `POSIX path of (choose folder with prompt "Select a workspace folder" default location POSIX file "${escapeAppleScriptString(initialDir)}")`
+    : 'POSIX path of (choose folder with prompt "Select a workspace folder")';
+
+  return runPickerCommand('osascript', ['-e', script]);
+}
+
+async function pickDirectoryWithZenity(initialDir?: string): Promise<string | null | undefined> {
+  const args = ['--file-selection', '--directory', '--title=Select a workspace folder'];
+  if (initialDir) {
+    args.push(`--filename=${initialDir.replace(/\/?$/, '/')}`);
+  }
+  return runPickerCommand('zenity', args);
+}
+
+async function pickDirectoryWithKDialog(initialDir?: string): Promise<string | null | undefined> {
+  const startDir = initialDir ?? os.homedir();
+  return runPickerCommand('kdialog', ['--getexistingdirectory', startDir, 'Select a workspace folder']);
+}
+
+/**
+ * Open the platform-native folder picker and return the selected directory.
+ * Returns null when the user cancels the dialog.
+ */
+export async function pickDirectory(initialDir?: string): Promise<string | null> {
+  const normalizedInitial = initialDir ? await normalizeExternalPath(initialDir) : undefined;
+
+  if (process.platform === 'win32' || isWSL()) {
+    const dialogStart = normalizedInitial && isWSL()
+      ? (await toWindowsPath(normalizedInitial)) ?? normalizedInitial
+      : normalizedInitial;
+    const selected = await pickDirectoryWithPowerShell(dialogStart);
+    return selected ? normalizeExternalPath(selected) : null;
+  }
+
+  if (process.platform === 'darwin') {
+    const selected = await pickDirectoryWithAppleScript(normalizedInitial);
+    if (selected !== undefined) {
+      return selected ? normalizeExternalPath(selected) : null;
+    }
+  }
+
+  const zenitySelected = await pickDirectoryWithZenity(normalizedInitial);
+  if (zenitySelected !== undefined) {
+    return zenitySelected ? normalizeExternalPath(zenitySelected) : null;
+  }
+
+  const kdialogSelected = await pickDirectoryWithKDialog(normalizedInitial);
+  if (kdialogSelected !== undefined) {
+    return kdialogSelected ? normalizeExternalPath(kdialogSelected) : null;
+  }
+
+  throw new Error('No native folder picker is available on this system.');
 }

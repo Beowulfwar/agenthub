@@ -242,6 +242,10 @@ export interface SuggestionDir {
   skillCount: number;
 }
 
+export interface PickDirectoryResult {
+  selectedDir: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------

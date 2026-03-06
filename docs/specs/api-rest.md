@@ -4,11 +4,11 @@
 
 ## Proposito
 
-API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server`. Expoe endpoints para gerenciar skills, configuracao, cache, workspace, deploy e sync. Inclui error handler centralizado que mapeia a hierarquia de erros do dominio para codigos HTTP deterministicos, e suporte a SSE (Server-Sent Events) para progresso de sync em tempo real.
+API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server`. Expoe endpoints para gerenciar skills, configuracao, cache, workspace, exploracao de diretorios, deploy e sync. Inclui error handler centralizado que mapeia a hierarquia de erros do dominio para codigos HTTP deterministicos, e suporte a SSE (Server-Sent Events) para progresso de sync em tempo real.
 
 ## Localizacao
 
-- **Codigo**: `src/api/server.ts`, `src/api/router.ts`, `src/api/middleware.ts`, `src/api/routes/health.ts`, `src/api/routes/skills.ts`, `src/api/routes/config.ts`, `src/api/routes/cache.ts`, `src/api/routes/workspace.ts`, `src/api/routes/deploy.ts`, `src/api/routes/sync.ts`
+- **Codigo**: `src/api/server.ts`, `src/api/router.ts`, `src/api/middleware.ts`, `src/api/routes/health.ts`, `src/api/routes/skills.ts`, `src/api/routes/config.ts`, `src/api/routes/cache.ts`, `src/api/routes/workspace.ts`, `src/api/routes/explorer.ts`, `src/api/routes/deploy.ts`, `src/api/routes/sync.ts`
 - **Testes unitarios**: `tests/api/routes.test.ts`
 - **Testes de caracterizacao**: `tests/specs/api-rest.spec.ts`
 
@@ -67,6 +67,18 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - **When**: `GET /api/sync/stream`
 - **Then**: Abre conexao SSE, emite eventos `progress` com `{ phase, skill, target, current, total }`, ao final emite evento `complete` com `SyncResult`, fecha conexao
 
+### POST /api/workspace/registry aceita uma pasta e resolve o manifesto
+
+- **Given**: Body `{ directory: "/projeto/app", create: true }` e nenhum `ahub.workspace.json` existe em `/projeto/app` ou acima
+- **When**: `POST /api/workspace/registry`
+- **Then**: Cria `/projeto/app/ahub.workspace.json`, registra esse manifesto e retorna `{ data: { registered, created: true } }`
+
+### POST /api/explorer/pick-directory retorna a pasta selecionada no dialogo nativo
+
+- **Given**: Cliente aciona a rota a partir da UI local
+- **When**: `POST /api/explorer/pick-directory`
+- **Then**: O backend abre o seletor nativo de pastas do sistema operacional e retorna `{ data: { selectedDir } }`, onde `selectedDir` pode ser `null` se o usuario cancelar
+
 ### Error handler mapeia ProviderNotConfiguredError para 503
 
 - **Given**: Rota lanca `ProviderNotConfiguredError`
@@ -99,6 +111,14 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | DELETE | `/api/cache` | Limpar todo o cache | `{ data: { cleared: true } }` | — |
 | GET | `/api/workspace` | Manifest + skills resolvidas | `{ data: { manifest, filePath, resolved } }` | — |
 | PUT | `/api/workspace` | Salvar manifest | `{ data: { saved } }` | — |
+| GET | `/api/workspace/registry` | Listar workspaces registrados | `{ data: WorkspaceRegistryEntry[] }` | — |
+| POST | `/api/workspace/registry` | Registrar ou criar workspace a partir de manifesto/pasta | `{ data: { registered, created } }` | 400 |
+| DELETE | `/api/workspace/registry` | Remover workspace registrado | `{ data: { unregistered } }` | — |
+| PUT | `/api/workspace/active` | Definir workspace ativo | `{ data: { active } }` | 400 |
+| GET | `/api/explorer/browse?dir=&hidden=` | Listar diretorios navegaveis | `{ data: { currentDir, entries } }` | 400 |
+| GET | `/api/explorer/scan?dir=` | Detectar diretorios de skills conhecidos | `{ data: { baseDir, detected } }` | 400 |
+| GET | `/api/explorer/suggestions` | Sugerir diretorios iniciais para exploracao | `{ data: SuggestionDir[] }` | — |
+| POST | `/api/explorer/pick-directory` | Abrir seletor nativo de pasta | `{ data: { selectedDir } }` | 500 |
 | POST | `/api/deploy` | Deploy multi-skill multi-target | `{ data: { deployed[], failed[] } }` | 400 |
 | POST | `/api/sync` | Sync completo (nao-streaming) | `{ data: SyncResult }` | 404 |
 | GET | `/api/sync/stream` | SSE de progresso do sync | eventos SSE | evento error |
@@ -130,7 +150,7 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 
 ## Dependencias
 
-- **Usa**: `hono` (framework HTTP), `@hono/node-server` (serve), `hono/cors` (CORS dev), `hono/streaming` (SSE), `core/config.ts`, `core/cache.ts`, `core/workspace.ts`, `core/sync.ts`, `core/skill.ts`, `core/sanitize.ts`, `core/errors.ts`, `storage/factory.ts`, `deploy/deployer.ts`
+- **Usa**: `hono` (framework HTTP), `@hono/node-server` (serve), `hono/cors` (CORS dev), `hono/streaming` (SSE), `core/config.ts`, `core/cache.ts`, `core/workspace.ts`, `core/explorer.ts`, `core/wsl.ts`, `core/sync.ts`, `core/skill.ts`, `core/sanitize.ts`, `core/errors.ts`, `storage/factory.ts`, `deploy/deployer.ts`
 - **Usado por**: `bin/ahub.ts` (comando `ui`), integracao com frontends HTTP
 
 ## Efeitos Colaterais
@@ -141,6 +161,8 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - `PUT /api/config/:key`: Modifica `~/.ahub/config.json` no disco
 - `DELETE /api/cache`: Remove todos os arquivos em `~/.ahub/cache/`
 - `POST /api/deploy`: Escreve arquivos no filesystem local (diretorio do deployer alvo)
+- `POST /api/workspace/registry`: Pode criar `ahub.workspace.json` no filesystem local antes de registrar o manifesto
+- `POST /api/explorer/pick-directory`: Abre o seletor nativo de pastas do sistema operacional local
 - `POST /api/sync` e `GET /api/sync/stream`: Combinam efeitos de storage e deploy (fetch + escrita local)
 - Servico de arquivos estaticos: Le arquivos do `staticDir` e serve com MIME types corretos
 
@@ -161,3 +183,4 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | Data | Mudanca |
 |------|---------|
 | 2025-03-05 | Spec criada |
+| 2026-03-06 | Documentados explorer REST, picker nativo de pasta e registro de workspace por diretorio |
