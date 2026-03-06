@@ -129,6 +129,13 @@ npm run build                # Build TypeScript
 npm test                     # Rodar testes
 ```
 
+## Documentation
+
+- **Specs**: `docs/specs/` — Behavioral specs for each module (Given/When/Then format)
+- **Spec Index**: `docs/specs/README.md` — Master index with links
+- **Template**: `docs/specs/_TEMPLATE.md` — Template for new specs
+- **CLAUDE.md**: Developer guidance for AI agents
+
 ## Licenca
 
 MIT

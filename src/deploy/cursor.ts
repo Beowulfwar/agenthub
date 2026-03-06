@@ -1,61 +1,75 @@
 /**
- * CursorDeployer — deploys skills as Cursor rule files.
+ * CursorDeployer — deploys content as Cursor rule/prompt/agent files.
  *
- * Target layout:
- *   .cursor/rules/<skill-name>.md
+ * Target layout (type-aware):
+ *   skill    → <cwd>/.cursor/rules/<name>.md
+ *   prompt   → <cwd>/.cursor/prompts/<name>.md
+ *   subagent → <cwd>/.cursor/agents/<name>.md
  *
- * The file content is the SKILL.md body **without** the YAML
- * frontmatter, so Cursor only sees the Markdown instructions.
- * Unlike Claude Code, the base directory defaults to the *current
- * working directory* rather than the user's home.
+ * The file content is the marker body (Markdown content after the YAML
+ * frontmatter). Unlike Claude Code, the base directory defaults to the
+ * *current working directory* rather than the user's home.
  */
 
 import { mkdir, writeFile, rm, access } from 'node:fs/promises';
 import path from 'node:path';
-import type { DeployTarget, SkillPackage } from '../core/types.js';
+import type { ContentType, DeployTarget, SkillPackage } from '../core/types.js';
 import type { Deployer } from './deployer.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
 
+/** Map content type → Cursor subdirectory name. */
+const TYPE_SUBDIRS: Record<ContentType, string> = {
+  skill: 'rules',
+  prompt: 'prompts',
+  subagent: 'agents',
+};
+
 export class CursorDeployer implements Deployer {
   readonly target: DeployTarget = 'cursor';
-  private readonly basePath: string;
+  private readonly customPath: string | undefined;
+  private readonly defaultRoot: string;
 
   /**
    * @param customPath - Override the default deploy directory.
-   *   Falls back to `<cwd>/.cursor/rules`.
+   *   Falls back to `<cwd>/.cursor/<subdir>` based on content type.
    */
   constructor(customPath?: string) {
-    this.basePath =
-      customPath ?? path.join(process.cwd(), '.cursor', 'rules');
+    this.customPath = customPath;
+    this.defaultRoot = path.join(process.cwd(), '.cursor');
+  }
+
+  /** Resolve the deploy directory based on content type. */
+  private resolveDir(type?: ContentType): string {
+    if (this.customPath) return this.customPath;
+    const subdir = TYPE_SUBDIRS[type ?? 'skill'];
+    return path.join(this.defaultRoot, subdir);
   }
 
   async deploy(pkg: SkillPackage): Promise<string> {
     assertSafeSkillName(pkg.skill.name);
-    await mkdir(this.basePath, { recursive: true });
+    const basePath = this.resolveDir(pkg.skill.type);
+    await mkdir(basePath, { recursive: true });
 
     const fileName = `${pkg.skill.name}.md`;
-    const filePath = path.join(this.basePath, fileName);
+    const filePath = path.join(basePath, fileName);
 
-    // Extract body without frontmatter.
-    // If the package was loaded normally, `skill.body` is already
-    // stripped; but if someone passes raw SKILL.md content in the
-    // files array we strip it defensively.
-    const body = pkg.skill.body;
-    await writeFile(filePath, body + '\n', 'utf-8');
+    // Write the Markdown body (without YAML frontmatter).
+    await writeFile(filePath, pkg.skill.body + '\n', 'utf-8');
 
     return filePath;
   }
 
   async undeploy(name: string): Promise<void> {
-    const filePath = path.join(this.basePath, `${name}.md`);
-
-    try {
-      await access(filePath);
-    } catch {
-      // File does not exist — nothing to remove.
-      return;
+    // Check all type subdirectories since we don't know the type.
+    for (const subdir of Object.values(TYPE_SUBDIRS)) {
+      const filePath = path.join(this.customPath ?? path.join(this.defaultRoot, subdir), `${name}.md`);
+      try {
+        await access(filePath);
+        await rm(filePath);
+        return;
+      } catch {
+        // Not in this subdir, try next.
+      }
     }
-
-    await rm(filePath);
   }
 }

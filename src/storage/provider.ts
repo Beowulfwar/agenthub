@@ -5,11 +5,19 @@
  * rest of the application can work against a single abstraction.
  */
 
-import type { HealthCheckResult, SkillPackage } from '../core/types.js';
+import type { ContentType, HealthCheckResult, SkillPackage } from '../core/types.js';
+
+/** Options for listing skills with optional filters. */
+export interface ListOptions {
+  /** Substring filter applied to skill names. */
+  query?: string;
+  /** Filter by content type (skill, prompt, subagent). */
+  type?: ContentType;
+}
 
 export interface StorageProvider {
   /** Provider identifier. */
-  readonly name: 'git' | 'drive';
+  readonly name: 'git' | 'drive' | 'local';
 
   /** Verify that the provider is reachable and credentials are valid. */
   healthCheck(): Promise<HealthCheckResult>;
@@ -17,9 +25,9 @@ export interface StorageProvider {
   /**
    * List skill names available in the backend.
    *
-   * @param query - Optional substring filter applied to skill names.
+   * @param options - A query string or {@link ListOptions} with optional type filter.
    */
-  list(query?: string): Promise<string[]>;
+  list(options?: string | ListOptions): Promise<string[]>;
 
   /** Return `true` when a skill with the given name exists. */
   exists(name: string): Promise<boolean>;

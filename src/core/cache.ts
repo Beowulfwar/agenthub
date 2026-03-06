@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import { AHUB_DIR } from './config.js';
 import type { SkillFile, SkillPackage } from './types.js';
+import { ALL_MARKER_FILES, MARKER_TO_TYPE } from './types.js';
 import { parseSkill } from './skill.js';
 import { assertSafeRelativePath, assertSafeSkillName } from './sanitize.js';
 
@@ -71,12 +72,21 @@ export class CacheManager {
     }
 
     const skillDir = path.join(CACHE_DIR, name);
-    const skillMdPath = path.join(skillDir, 'SKILL.md');
 
-    let raw: string;
-    try {
-      raw = await readFile(skillMdPath, 'utf-8');
-    } catch {
+    // Find the marker file (SKILL.md, PROMPT.md, or AGENT.md).
+    let raw: string | undefined;
+    let detectedMarker = 'SKILL.md';
+    for (const marker of ALL_MARKER_FILES) {
+      try {
+        raw = await readFile(path.join(skillDir, marker), 'utf-8');
+        detectedMarker = marker;
+        break;
+      } catch {
+        // Try next marker.
+      }
+    }
+
+    if (raw === undefined) {
       // Index references a skill that no longer exists on disk -- clean up.
       delete index[name];
       await this.writeIndex(index);
@@ -84,6 +94,10 @@ export class CacheManager {
     }
 
     const skill = parseSkill(raw);
+    // Set type from detected marker if not already set in frontmatter.
+    if (!skill.type) {
+      skill.type = MARKER_TO_TYPE[detectedMarker] ?? 'skill';
+    }
     const files = await this.walkDir(skillDir, skillDir);
 
     return { skill, files };

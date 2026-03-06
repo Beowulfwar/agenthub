@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 
 export type {
+  ContentType,
   Skill,
   SkillFile,
   SkillMetadata,
@@ -19,8 +20,26 @@ export type {
   DeployTarget,
   GitConfig,
   DriveConfig,
+  LocalConfig,
+  SourceConfig,
   AhubConfig,
   HealthCheckResult,
+  WorkspaceSkillEntry,
+  WorkspaceTargetGroup,
+  WorkspaceManifest,
+  SyncDeployedEntry,
+  SyncFailedEntry,
+  SyncResult,
+  SyncOptions,
+  SyncProgressEvent,
+  SkillFrontmatterExtensions,
+  AhubProfile,
+} from './core/types.js';
+
+export {
+  CONTENT_TYPE_CONFIG,
+  ALL_MARKER_FILES,
+  MARKER_TO_TYPE,
 } from './core/types.js';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +53,8 @@ export {
   SkillValidationError,
   AuthenticationError,
   MigrationError,
+  WorkspaceNotFoundError,
+  SyncError,
 } from './core/errors.js';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +67,10 @@ export {
   validateSkill,
   loadSkillPackage,
   saveSkillPackage,
+  extractSkillExtensions,
+  detectContentType,
+  getMarkerFile,
+  getCompanionDirs,
 } from './core/skill.js';
 
 // ---------------------------------------------------------------------------
@@ -57,11 +82,21 @@ export {
   CONFIG_PATH,
   ensureAhubDir,
   loadConfig,
+  loadConfigV2,
   saveConfig,
   requireConfig,
   getConfigValue,
   setConfigValue,
   getDefaultDeployPaths,
+  isLegacyConfig,
+  migrateConfigToV2,
+  addSource,
+  removeSource,
+  listSources,
+  setDefaultSource,
+  getSource,
+  setSourceEnabled,
+  detectLocalSkillDirs,
 } from './core/config.js';
 
 // ---------------------------------------------------------------------------
@@ -71,13 +106,74 @@ export {
 export { CacheManager } from './core/cache.js';
 
 // ---------------------------------------------------------------------------
+// Core — Clipboard
+// ---------------------------------------------------------------------------
+
+export { copyToClipboard, resolveClipboardCommand } from './core/clipboard.js';
+
+// ---------------------------------------------------------------------------
+// Core — Stats
+// ---------------------------------------------------------------------------
+
+export type { SkillStats } from './core/stats.js';
+export { getSkillStats, formatBytes } from './core/stats.js';
+
+// ---------------------------------------------------------------------------
+// Core — Workspace
+// ---------------------------------------------------------------------------
+
+export {
+  WORKSPACE_FILENAMES,
+  findWorkspaceManifest,
+  loadWorkspaceManifest,
+  requireWorkspaceManifest,
+  saveWorkspaceManifest,
+  resolveManifestSkills,
+} from './core/workspace.js';
+
+// ---------------------------------------------------------------------------
+// Core — WSL utilities
+// ---------------------------------------------------------------------------
+
+export {
+  isWSL,
+  resolveWSLPath,
+  toWSLUncPath,
+  normalizePath,
+  detectWSLDistro,
+  getHomeDir,
+} from './core/wsl.js';
+
+// ---------------------------------------------------------------------------
+// Core — Filesystem explorer
+// ---------------------------------------------------------------------------
+
+export type { DetectedSkillDir, DirEntry } from './core/explorer.js';
+
+export {
+  WELL_KNOWN_SKILL_DIRS,
+  scanForSkillDirs,
+  listDirectory,
+  suggestStartDirs,
+  isValidDirectory,
+} from './core/explorer.js';
+
+// ---------------------------------------------------------------------------
+// Core — Sync engine
+// ---------------------------------------------------------------------------
+
+export { syncWorkspace } from './core/sync.js';
+
+// ---------------------------------------------------------------------------
 // Storage — Provider interface & implementations
 // ---------------------------------------------------------------------------
 
-export type { StorageProvider } from './storage/provider.js';
-export { createProvider } from './storage/factory.js';
+export type { StorageProvider, ListOptions } from './storage/provider.js';
+export { createProvider, createProviderFromSource, createAggregateProvider } from './storage/factory.js';
 export { GitProvider } from './storage/git-provider.js';
 export { DriveProvider } from './storage/drive-provider.js';
+export { LocalProvider } from './storage/local-provider.js';
+export { AggregateProvider, parseQualifiedName, formatQualifiedName } from './storage/aggregate-provider.js';
 
 // ---------------------------------------------------------------------------
 // Deploy — Deployer interface & implementations
@@ -88,3 +184,11 @@ export { createDeployer } from './deploy/deployer.js';
 export { ClaudeCodeDeployer } from './deploy/claude-code.js';
 export { CodexDeployer } from './deploy/codex.js';
 export { CursorDeployer } from './deploy/cursor.js';
+
+// ---------------------------------------------------------------------------
+// API — HTTP server
+// ---------------------------------------------------------------------------
+
+export { createApiApp } from './api/router.js';
+export { startApiServer } from './api/server.js';
+export type { ServerOptions } from './api/server.js';

@@ -17,3 +17,7 @@ Thumbs.db
 
 # Test
 coverage/
+
+# Frontend
+ui/node_modules/
+ui/dist/

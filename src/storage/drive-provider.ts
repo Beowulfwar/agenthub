@@ -23,13 +23,14 @@ import type {
   SkillFile,
   SkillPackage,
 } from '../core/types.js';
+import { ALL_MARKER_FILES } from '../core/types.js';
 import {
   AhubError,
   AuthenticationError,
   SkillNotFoundError,
 } from '../core/errors.js';
 import { parseSkill } from '../core/skill.js';
-import type { StorageProvider } from './provider.js';
+import type { ListOptions, StorageProvider } from './provider.js';
 
 // ---------------------------------------------------------------------------
 // Types for the googleapis SDK (kept narrow to avoid top-level import)
@@ -454,7 +455,8 @@ export class DriveProvider implements StorageProvider {
     }
   }
 
-  async list(query?: string): Promise<string[]> {
+  async list(options?: string | ListOptions): Promise<string[]> {
+    const opts = typeof options === 'string' ? { query: options } : (options ?? {});
     const drive = await this.ensureClient();
     const parentId = await this.ensureFolderId();
 
@@ -481,10 +483,14 @@ export class DriveProvider implements StorageProvider {
 
     const sorted = names.sort();
 
-    if (query) {
-      const lower = query.toLowerCase();
+    if (opts.query) {
+      const lower = opts.query.toLowerCase();
       return sorted.filter((n) => n.toLowerCase().includes(lower));
     }
+
+    // Note: type filtering for Drive is not efficient (would require
+    // fetching each folder's contents). Drive folders are returned as-is;
+    // type filtering is handled at the caller level when needed.
 
     return sorted;
   }
@@ -504,9 +510,9 @@ export class DriveProvider implements StorageProvider {
 
     const files = await this.listFilesRecursive(folderId);
 
-    // Find SKILL.md to extract metadata.
+    // Find the marker file (SKILL.md, PROMPT.md, or AGENT.md).
     const skillMdFile = files.find(
-      (f) => f.relativePath === 'SKILL.md',
+      (f) => (ALL_MARKER_FILES as readonly string[]).includes(f.relativePath),
     );
 
     if (!skillMdFile) {

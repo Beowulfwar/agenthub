@@ -87,3 +87,34 @@ export class MigrationError extends AhubError {
     this.migrationName = migrationName;
   }
 }
+
+/**
+ * Thrown when a workspace manifest (`ahub.workspace.json`) cannot be
+ * found by walking up from the current directory.
+ */
+export class WorkspaceNotFoundError extends AhubError {
+  public readonly searchDir: string;
+
+  constructor(searchDir: string, options?: ErrorOptions) {
+    super(
+      `No workspace manifest found. Searched from "${searchDir}" upward.\n` +
+        'Create one with "ahub workspace init" or place an ahub.workspace.json in your project root.',
+      options,
+    );
+    this.name = 'WorkspaceNotFoundError';
+    this.searchDir = searchDir;
+  }
+}
+
+/**
+ * Thrown when a workspace sync completes with one or more failures.
+ */
+export class SyncError extends AhubError {
+  public readonly failCount: number;
+
+  constructor(failCount: number, options?: ErrorOptions) {
+    super(`Sync completed with ${failCount} failure(s).`, options);
+    this.name = 'SyncError';
+    this.failCount = failCount;
+  }
+}

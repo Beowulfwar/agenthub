@@ -72,3 +72,24 @@ export function assertSafePackage(pkg: SkillPackage): void {
     assertSafeRelativePath(file.relativePath);
   }
 }
+
+/**
+ * Validate that a source ID is safe for filesystem and config use.
+ * Same rules as skill names: alphanumeric start, [a-zA-Z0-9._-] chars.
+ * @throws {SkillValidationError} if the ID is unsafe.
+ */
+export function assertSafeSourceId(id: string): void {
+  if (!id || id.trim().length === 0) {
+    throw new SkillValidationError(['Source ID cannot be empty.']);
+  }
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) {
+    throw new SkillValidationError([
+      `Source ID "${id}" contains invalid characters. Only letters, numbers, hyphens, underscores and dots are allowed (must start with alphanumeric).`,
+    ]);
+  }
+  if (id.includes('..') || id.includes('/') || id.includes('\\')) {
+    throw new SkillValidationError([
+      `Source ID "${id}" contains path traversal characters.`,
+    ]);
+  }
+}

@@ -13,10 +13,12 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import { simpleGit, type SimpleGit } from 'simple-git';
 
 import type {
+  ContentType,
   GitConfig,
   HealthCheckResult,
   SkillPackage,
 } from '../core/types.js';
+import { ALL_MARKER_FILES, MARKER_TO_TYPE } from '../core/types.js';
 import {
   AhubError,
   SkillNotFoundError,
@@ -26,7 +28,7 @@ import {
   saveSkillPackage,
 } from '../core/skill.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
-import type { StorageProvider } from './provider.js';
+import type { ListOptions, StorageProvider } from './provider.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -186,7 +188,8 @@ export class GitProvider implements StorageProvider {
     }
   }
 
-  async list(query?: string): Promise<string[]> {
+  async list(options?: string | ListOptions): Promise<string[]> {
+    const opts = typeof options === 'string' ? { query: options } : (options ?? {});
     await this.pullIfStale();
 
     let entries: string[];
@@ -199,16 +202,27 @@ export class GitProvider implements StorageProvider {
       return [];
     }
 
-    // Keep only directories that contain a SKILL.md file.
+    // Keep only directories that contain a known marker file.
     const skills: string[] = [];
     for (const name of entries) {
-      if (await isFile(path.join(this.skillDir(name), 'SKILL.md'))) {
-        skills.push(name);
+      const dir = this.skillDir(name);
+      let detectedType: ContentType | null = null;
+
+      for (const marker of ALL_MARKER_FILES) {
+        if (await isFile(path.join(dir, marker))) {
+          detectedType = MARKER_TO_TYPE[marker] ?? 'skill';
+          break;
+        }
       }
+
+      if (detectedType === null) continue;
+      if (opts.type && detectedType !== opts.type) continue;
+
+      skills.push(name);
     }
 
-    if (query) {
-      const lower = query.toLowerCase();
+    if (opts.query) {
+      const lower = opts.query.toLowerCase();
       return skills.filter((s) => s.toLowerCase().includes(lower));
     }
 
@@ -217,7 +231,16 @@ export class GitProvider implements StorageProvider {
 
   async exists(name: string): Promise<boolean> {
     await this.pullIfStale();
-    return isFile(path.join(this.skillDir(name), 'SKILL.md'));
+    const dir = this.skillDir(name);
+
+    // Check for any known marker file.
+    for (const marker of ALL_MARKER_FILES) {
+      if (await isFile(path.join(dir, marker))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   async get(name: string): Promise<SkillPackage> {
@@ -225,7 +248,7 @@ export class GitProvider implements StorageProvider {
     await this.pullIfStale();
 
     const dir = this.skillDir(name);
-    if (!(await isFile(path.join(dir, 'SKILL.md')))) {
+    if (!(await this.exists(name))) {
       throw new SkillNotFoundError(name);
     }
 
