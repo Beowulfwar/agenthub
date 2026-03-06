@@ -12,6 +12,7 @@ import { workspaceRoutes } from './routes/workspace.js';
 import { deployRoutes } from './routes/deploy.js';
 import { syncRoutes } from './routes/sync.js';
 import { sourcesRoutes } from './routes/sources.js';
+import { explorerRoutes } from './routes/explorer.js';
 
 /**
  * Create the Hono app with all API routes mounted.
@@ -31,6 +32,7 @@ export function createApiApp(): Hono {
   app.route('/api/deploy', deployRoutes());
   app.route('/api/sync', syncRoutes());
   app.route('/api/sources', sourcesRoutes());
+  app.route('/api/explorer', explorerRoutes());
 
   return app;
 }

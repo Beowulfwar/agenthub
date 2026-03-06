@@ -18,6 +18,9 @@ import type {
   WorkspaceData,
   WorkspaceManifest,
   WorkspaceRegistryEntry,
+  BrowseResult,
+  ScanResult,
+  SuggestionDir,
   AhubConfig,
   ApiSuccess,
 } from './types';
@@ -135,6 +138,24 @@ export async function setActiveWorkspaceApi(filePath: string): Promise<{ active:
   return unwrap(
     await api.put<ApiSuccess<{ active: string }>>('/workspace/active', { filePath }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Explorer (directory browsing)
+// ---------------------------------------------------------------------------
+
+export async function browseDirectory(dir?: string): Promise<BrowseResult> {
+  const params: Record<string, string> = {};
+  if (dir) params.dir = dir;
+  return unwrap(await api.get<ApiSuccess<BrowseResult>>('/explorer/browse', { params }));
+}
+
+export async function scanSkillDirs(dir: string): Promise<ScanResult> {
+  return unwrap(await api.get<ApiSuccess<ScanResult>>('/explorer/scan', { params: { dir } }));
+}
+
+export async function fetchSuggestions(): Promise<SuggestionDir[]> {
+  return unwrap(await api.get<ApiSuccess<SuggestionDir[]>>('/explorer/suggestions'));
 }
 
 // ---------------------------------------------------------------------------

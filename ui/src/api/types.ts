@@ -204,6 +204,43 @@ export interface SyncProgressEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Explorer (directory browsing)
+// ---------------------------------------------------------------------------
+
+export interface DirEntry {
+  name: string;
+  fullPath: string;
+  isDirectory: boolean;
+  skillMatch?: {
+    label: string;
+    tool: string;
+    count: number;
+  };
+}
+
+export interface BrowseResult {
+  currentDir: string;
+  entries: DirEntry[];
+}
+
+export interface DetectedSkillDir {
+  absolutePath: string;
+  label: string;
+  tool: string;
+  skillCount: number;
+}
+
+export interface ScanResult {
+  baseDir: string;
+  detected: DetectedSkillDir[];
+}
+
+export interface SuggestionDir {
+  path: string;
+  exists: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
