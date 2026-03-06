@@ -252,10 +252,10 @@ async function chooseStartDir(): Promise<string> {
   const suggestions = suggestStartDirs();
   const validSuggestions: Array<{ name: string; value: string }> = [];
 
-  for (const dir of suggestions) {
+  for (const { path: dir, label } of suggestions) {
     if (await isValidDirectory(dir)) {
-      const label = dir === process.cwd() ? `${dir} (current)` : dir;
-      validSuggestions.push({ name: label, value: dir });
+      const displayLabel = dir === process.cwd() ? `${label} — ${dir} (current)` : `${label} — ${dir}`;
+      validSuggestions.push({ name: displayLabel, value: dir });
     }
   }
 

@@ -258,22 +258,46 @@ const SKIP_DIRS = new Set([
 
 /**
  * Suggest starting directories for the explorer based on common workspace locations.
+ * Returns paths grouped by category: current project, home, common dev dirs.
  */
-export function suggestStartDirs(): string[] {
+export function suggestStartDirs(): Array<{ path: string; label: string }> {
   const home = os.homedir();
-  const dirs: string[] = [
-    home,
-    path.join(home, 'projects'),
-    path.join(home, 'workspace'),
-    path.join(home, 'code'),
-    path.join(home, 'dev'),
-    path.join(home, 'repos'),
-    path.join(home, 'Documents'),
-    path.join(home, 'src'),
-    process.cwd(),
+  const cwd = process.cwd();
+  const seen = new Set<string>();
+
+  const dirs: Array<{ path: string; label: string }> = [];
+
+  const add = (p: string, label: string) => {
+    const normalized = normalizePath(p);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      dirs.push({ path: normalized, label });
+    }
+  };
+
+  // Current working directory (likely the project)
+  add(cwd, 'Current directory');
+
+  // Home directory
+  add(home, 'Home');
+
+  // Common dev directories
+  const devDirs = [
+    { rel: 'projects', label: 'Projects' },
+    { rel: 'workspace', label: 'Workspace' },
+    { rel: 'code', label: 'Code' },
+    { rel: 'dev', label: 'Dev' },
+    { rel: 'repos', label: 'Repos' },
+    { rel: 'src', label: 'Source' },
+    { rel: 'Documents', label: 'Documents' },
+    { rel: 'programacao', label: 'Programação' },
   ];
 
-  return [...new Set(dirs.map(normalizePath))];
+  for (const d of devDirs) {
+    add(path.join(home, d.rel), d.label);
+  }
+
+  return dirs;
 }
 
 /**

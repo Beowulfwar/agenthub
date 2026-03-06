@@ -58,15 +58,25 @@ export function explorerRoutes(): Hono {
 
   // GET /api/explorer/suggestions
   app.get('/suggestions', async (c) => {
-    const dirs = suggestStartDirs();
-    const valid: Array<{ path: string; exists: boolean }> = [];
+    const candidates = suggestStartDirs();
+    const results: Array<{
+      path: string;
+      label: string;
+      exists: boolean;
+      skillCount: number;
+    }> = [];
 
-    for (const dir of dirs) {
+    for (const { path: dir, label } of candidates) {
       const exists = await isValidDirectory(dir);
-      valid.push({ path: dir, exists });
+      if (!exists) continue;
+
+      // Quick scan for skill dirs in this location
+      const detected = await scanForSkillDirs(dir);
+      const skillCount = detected.reduce((sum, d) => sum + d.skillCount, 0);
+      results.push({ path: dir, label, exists, skillCount });
     }
 
-    return c.json({ data: valid.filter((d) => d.exists) });
+    return c.json({ data: results });
   });
 
   return app;

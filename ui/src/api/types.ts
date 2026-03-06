@@ -237,7 +237,9 @@ export interface ScanResult {
 
 export interface SuggestionDir {
   path: string;
+  label: string;
   exists: boolean;
+  skillCount: number;
 }
 
 // ---------------------------------------------------------------------------

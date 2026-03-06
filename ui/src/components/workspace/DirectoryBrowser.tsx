@@ -52,8 +52,8 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [manualPath, setManualPath] = useState('');
-  const [showManual, setShowManual] = useState(false);
   const [phase, setPhase] = useState<'suggestions' | 'browsing'>('suggestions');
+  const [error, setError] = useState('');
 
   // Load suggestions on mount
   useEffect(() => {
@@ -62,12 +62,16 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
         setSuggestions(data);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        setError(err?.message ?? 'Failed to load suggestions');
+        setLoading(false);
+      });
   }, []);
 
   const navigateTo = useCallback(async (dir: string) => {
     setLoading(true);
     setDetected([]);
+    setError('');
     setPhase('browsing');
 
     try {
@@ -80,8 +84,8 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
       const scanResult = await scanSkillDirs(result.currentDir);
       setDetected(scanResult.detected);
       setScanning(false);
-    } catch {
-      // Fallback: just show the directory
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Cannot access: ${dir}`);
       setCurrentDir(dir);
       setEntries([]);
     }
@@ -100,7 +104,6 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
     const trimmed = manualPath.trim();
     if (trimmed) {
       navigateTo(trimmed);
-      setShowManual(false);
       setManualPath('');
     }
   };
@@ -112,24 +115,47 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
   if (phase === 'suggestions') {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium text-gray-700">
-          Where are your skills located?
+        <p className="text-sm text-gray-500">
+          Select a directory to browse, or type a path below.
         </p>
 
         {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+          <div className="flex items-center justify-center gap-2 py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-brand-500" />
+            <span className="text-sm text-gray-400">Scanning directories...</span>
+          </div>
+        ) : error ? (
+          <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">
+            {error}
+          </div>
+        ) : suggestions.length === 0 ? (
+          <div className="rounded-lg bg-gray-50 px-4 py-6 text-center text-sm text-gray-400">
+            No directories found. Type a path manually below.
           </div>
         ) : (
-          <div className="max-h-64 space-y-1 overflow-y-auto">
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-gray-200">
             {suggestions.map((s) => (
               <button
                 key={s.path}
                 onClick={() => navigateTo(s.path)}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 transition-colors"
+                className="flex w-full items-center gap-3 border-b border-gray-100 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-brand-50 transition-colors"
               >
                 <Folder className="h-4 w-4 shrink-0 text-gray-400" />
-                <span className="truncate font-mono text-gray-700">{s.path}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-800">{s.label}</span>
+                    {s.skillCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                        <Sparkles className="h-3 w-3" />
+                        {s.skillCount} skill{s.skillCount !== 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <span className="block truncate font-mono text-xs text-gray-400">
+                    {s.path}
+                  </span>
+                </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
               </button>
             ))}
           </div>
@@ -142,13 +168,13 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
             value={manualPath}
             onChange={(e) => setManualPath(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleManualNav()}
-            placeholder="Or type a path..."
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 font-mono text-sm text-gray-900 outline-none focus:border-brand-500"
+            placeholder="/path/to/directory"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
           />
           <button
             onClick={handleManualNav}
             disabled={!manualPath.trim()}
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+            className="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Go
           </button>
@@ -173,7 +199,7 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
       {/* Current path + navigation */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setPhase('suggestions')}
+          onClick={() => { setPhase('suggestions'); setError(''); }}
           title="Back to suggestions"
           className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
         >
@@ -190,6 +216,11 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
           {currentDir}
         </div>
       </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>
+      )}
 
       {/* Detected skill directories */}
       {detected.length > 0 && (
@@ -239,10 +270,11 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
       {/* Directory listing */}
       <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
         {loading ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex items-center justify-center gap-2 py-8">
             <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            <span className="text-sm text-gray-400">Loading...</span>
           </div>
-        ) : entries.length === 0 ? (
+        ) : entries.length === 0 && !error ? (
           <p className="py-6 text-center text-sm text-gray-400">Empty directory</p>
         ) : (
           entries.map((entry) => (
@@ -280,35 +312,24 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
         )}
       </div>
 
-      {/* Manual path toggle */}
-      {!showManual ? (
+      {/* Manual path input */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={manualPath}
+          onChange={(e) => setManualPath(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleManualNav()}
+          placeholder="Type a path..."
+          className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 font-mono text-sm text-gray-900 outline-none focus:border-brand-500"
+        />
         <button
-          onClick={() => setShowManual(true)}
-          className="flex items-center gap-1 self-start text-xs text-gray-400 hover:text-gray-600"
+          onClick={handleManualNav}
+          disabled={!manualPath.trim()}
+          className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-40"
         >
-          <Search className="h-3 w-3" />
-          Type a path manually
+          Go
         </button>
-      ) : (
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={manualPath}
-            onChange={(e) => setManualPath(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleManualNav()}
-            autoFocus
-            placeholder="/path/to/directory"
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 font-mono text-sm text-gray-900 outline-none focus:border-brand-500"
-          />
-          <button
-            onClick={handleManualNav}
-            disabled={!manualPath.trim()}
-            className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            Go
-          </button>
-        </div>
-      )}
+      </div>
 
       {/* Bottom actions */}
       <div className="flex justify-between border-t pt-3">
@@ -318,7 +339,7 @@ export function DirectoryBrowser({ onSelect, onCancel }: DirectoryBrowserProps) 
         >
           Cancel
         </button>
-        {detected.length === 0 && (
+        {detected.length === 0 && !loading && (
           <button
             onClick={() => onSelect(currentDir, [])}
             className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
