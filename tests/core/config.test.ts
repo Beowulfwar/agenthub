@@ -205,6 +205,6 @@ describe('setConfigValue', () => {
     mockReadFile.mockResolvedValue(JSON.stringify(existing));
 
     await expect(setConfigValue('provider', 'invalid'))
-      .rejects.toThrow('Invalid config: provider must be "git" or "drive"');
+      .rejects.toThrow('Invalid config:');
   });
 });

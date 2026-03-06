@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "test-workspace",
+  "description": "A test workspace for unit tests",
+  "defaultTargets": ["claude-code"],
+  "skills": [
+    { "name": "skill-a" },
+    { "name": "skill-b", "targets": ["cursor"] }
+  ],
+  "groups": [
+    {
+      "targets": ["claude-code", "codex"],
+      "skills": ["skill-c", "skill-d"]
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { parseSkill, serializeSkill, validateSkill } from '../../src/core/skill.js';
+import { parseSkill, serializeSkill, validateSkill, extractSkillExtensions } from '../../src/core/skill.js';
 import { SkillValidationError } from '../../src/core/errors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -200,5 +200,80 @@ describe('validateSkill', () => {
     };
 
     expect(() => validateSkill(skill)).toThrow(SkillValidationError);
+  });
+});
+
+describe('extractSkillExtensions', () => {
+  it('extracts tags, targets, and category from metadata', () => {
+    const skill = {
+      name: 'ext-skill',
+      description: 'Has extensions',
+      body: 'Body.',
+      metadata: {
+        tags: ['fiscal', 'ops'],
+        targets: ['claude-code', 'cursor'],
+        category: 'fiscal',
+      },
+    };
+
+    const ext = extractSkillExtensions(skill);
+    expect(ext.tags).toEqual(['fiscal', 'ops']);
+    expect(ext.targets).toEqual(['claude-code', 'cursor']);
+    expect(ext.category).toBe('fiscal');
+  });
+
+  it('returns undefined for missing extension fields', () => {
+    const skill = {
+      name: 'plain-skill',
+      description: 'No extensions',
+      body: 'Body.',
+      metadata: {},
+    };
+
+    const ext = extractSkillExtensions(skill);
+    expect(ext.tags).toBeUndefined();
+    expect(ext.targets).toBeUndefined();
+    expect(ext.category).toBeUndefined();
+  });
+
+  it('handles skill with no metadata at all', () => {
+    const skill = {
+      name: 'no-meta',
+      description: 'No metadata',
+      body: 'Body.',
+    };
+
+    const ext = extractSkillExtensions(skill);
+    expect(ext.tags).toBeUndefined();
+    expect(ext.targets).toBeUndefined();
+    expect(ext.category).toBeUndefined();
+  });
+
+  it('filters out invalid target strings', () => {
+    const skill = {
+      name: 'bad-targets',
+      description: 'Invalid targets',
+      body: 'Body.',
+      metadata: {
+        targets: ['claude-code', 'invalid', 'cursor', 42],
+      },
+    };
+
+    const ext = extractSkillExtensions(skill);
+    expect(ext.targets).toEqual(['claude-code', 'cursor']);
+  });
+
+  it('filters out non-string tags', () => {
+    const skill = {
+      name: 'bad-tags',
+      description: 'Mixed tags',
+      body: 'Body.',
+      metadata: {
+        tags: ['valid', 123, null, 'also-valid'],
+      },
+    };
+
+    const ext = extractSkillExtensions(skill);
+    expect(ext.tags).toEqual(['valid', 'also-valid']);
   });
 });
