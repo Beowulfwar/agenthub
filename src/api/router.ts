@@ -13,6 +13,8 @@ import { deployRoutes } from './routes/deploy.js';
 import { syncRoutes } from './routes/sync.js';
 import { sourcesRoutes } from './routes/sources.js';
 import { explorerRoutes } from './routes/explorer.js';
+import { appsRoutes } from './routes/apps.js';
+import { migrationsRoutes } from './routes/migrations.js';
 
 /**
  * Create the Hono app with all API routes mounted.
@@ -33,6 +35,8 @@ export function createApiApp(): Hono {
   app.route('/api/sync', syncRoutes());
   app.route('/api/sources', sourcesRoutes());
   app.route('/api/explorer', explorerRoutes());
+  app.route('/api/apps', appsRoutes());
+  app.route('/api/migrations', migrationsRoutes());
 
   return app;
 }

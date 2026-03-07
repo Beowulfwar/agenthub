@@ -2,6 +2,9 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { loadConfig, requireConfig, listSources, resolveDeployTargetRoot, getWorkspaceRegistry } from '../core/config.js';
+import { listAgentApps } from '../core/app-registry.js';
+import { buildWorkspaceAppInventories } from '../core/app-artifacts.js';
+import { planAppMigration } from '../core/app-migration.js';
 import { createProvider, createAggregateProvider, createProviderFromSource } from '../storage/factory.js';
 import { parseSkill, serializeSkill, validateSkill, getMarkerFile, extractSkillExtensions } from '../core/skill.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
@@ -10,9 +13,21 @@ import { findWorkspaceManifest, loadWorkspaceManifest, resolveManifestSkills } f
 import { syncWorkspace } from '../core/sync.js';
 import { getSkillStats, formatBytes } from '../core/stats.js';
 import type { StorageProvider } from '../storage/provider.js';
-import type { ContentType, DeployTarget } from '../core/types.js';
+import type { AgentAppId, ContentType, DeployTarget } from '../core/types.js';
 
 const CONTENT_TYPE_ENUM = z.enum(['skill', 'prompt', 'subagent']).optional();
+const APP_ID_ENUM = z.enum([
+  'codex',
+  'claude-code',
+  'cursor',
+  'windsurf',
+  'cline',
+  'continue',
+  'gemini-cli',
+  'amp',
+  'github-copilot',
+  'antigravity',
+]);
 
 /**
  * Get a provider for the given source (or default).
@@ -87,6 +102,114 @@ export function registerTools(server: McpServer): void {
           const marker = isDefault ? ' (default)' : '';
           lines.push(`  ${src.id}${marker} [${src.provider}] ${status}${src.label ? ` — ${src.label}` : ''}`);
         }
+
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ─── ahub_apps_catalog ───────────────────────────────────────
+  server.tool(
+    'ahub_apps_catalog',
+    'List official app repository conventions, support level and canonical paths',
+    {},
+    async () => {
+      try {
+        const apps = listAgentApps();
+        const lines = apps.map((app) => {
+          const workspacePaths = app.workspaceRelative.length > 0
+            ? ` workspace=${app.workspaceRelative.join(', ')}`
+            : '';
+          const userPaths = app.userRelative.length > 0
+            ? ` user=${app.userRelative.join(', ')}`
+            : '';
+          return `- ${app.label} [${app.supportLevel}]${workspacePaths}${userPaths}`;
+        });
+
+        return {
+          content: [{ type: 'text' as const, text: `Official app catalog:\n\n${lines.join('\n')}` }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ─── ahub_doctor ─────────────────────────────────────────────
+  server.tool(
+    'ahub_doctor',
+    'Audit workspace-local app repositories and report visibility issues',
+    {
+      workspaceDir: z.string().optional().describe('Workspace directory to inspect (defaults to current working directory)'),
+    },
+    async ({ workspaceDir }) => {
+      try {
+        const report = await buildWorkspaceAppInventories(workspaceDir ?? process.cwd());
+        const lines: string[] = [];
+
+        for (const app of report.filter((entry) => entry.counts.total > 0 || entry.supportLevel === 'official_app_unverified_layout')) {
+          lines.push(`${app.label} [${app.supportLevel}] total=${app.counts.total}`);
+          for (const artifact of app.artifacts) {
+            lines.push(`  - ${artifact.name} [${artifact.artifactKind}] ${artifact.visibilityStatus}`);
+            lines.push(`    found: ${artifact.detectedPath}`);
+            lines.push(`    expected: ${artifact.expectedPath}`);
+          }
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: lines.length > 0 ? lines.join('\n') : 'No known app artifacts found.' }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  // ─── ahub_migrate_app_plan ──────────────────────────────────
+  server.tool(
+    'ahub_migrate_app_plan',
+    'Create a dry-run migration plan between official app repositories',
+    {
+      fromApp: APP_ID_ENUM.describe('Source app'),
+      toApp: APP_ID_ENUM.describe('Target app'),
+      workspaceDir: z.string().optional().describe('Workspace directory to inspect'),
+      skill: z.string().optional().describe('Specific artifact/skill name'),
+      all: z.boolean().optional().describe('Include every detected artifact for the source app'),
+    },
+    async ({ fromApp, toApp, workspaceDir, skill, all }) => {
+      try {
+        const plan = await planAppMigration({
+          workspaceDir: workspaceDir ?? process.cwd(),
+          fromApp: fromApp as AgentAppId,
+          toApp: toApp as AgentAppId,
+          ...(skill ? { skill } : {}),
+          ...(all ? { all: true } : {}),
+        });
+
+        const lines = [
+          `Plan ${plan.fromApp} -> ${plan.toApp}`,
+          `workspace=${plan.workspaceDir}`,
+          `executable=${plan.executable} planned=${plan.plannedCount} blocked=${plan.blockedCount}`,
+          ...plan.blockedReasons.map((reason) => `blocked: ${reason}`),
+          ...plan.items.flatMap((item) => [
+            `- ${item.name}: ${item.migratable ? item.lossiness : 'blocked'}`,
+            `  from=${item.sourcePath}`,
+            `  to=${item.targetPath}`,
+            ...item.warnings.map((warning) => `  warning=${warning}`),
+            ...item.blockedReasons.map((reason) => `  blocked=${reason}`),
+          ]),
+        ];
 
         return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
       } catch (err) {

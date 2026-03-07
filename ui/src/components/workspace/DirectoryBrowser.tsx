@@ -11,16 +11,25 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { browseDirectory, scanSkillDirs, fetchSuggestions } from '../../api/client';
-import type { DirEntry, DetectedSkillDir, SuggestionDir } from '../../api/types';
+import type {
+  ArtifactVisibilityStatus,
+  DirEntry,
+  DetectedSkillDir,
+  SuggestionDir,
+  WorkspaceAppInventory,
+} from '../../api/types';
 
 const TOOL_COLORS: Record<string, string> = {
   'claude-code': 'bg-orange-100 text-orange-700',
   codex: 'bg-blue-100 text-blue-700',
   cursor: 'bg-purple-100 text-purple-700',
   windsurf: 'bg-cyan-100 text-cyan-700',
-  aider: 'bg-green-100 text-green-700',
   cline: 'bg-pink-100 text-pink-700',
   continue: 'bg-yellow-100 text-yellow-800',
+  'gemini-cli': 'bg-lime-100 text-lime-700',
+  amp: 'bg-rose-100 text-rose-700',
+  'github-copilot': 'bg-slate-100 text-slate-700',
+  antigravity: 'bg-indigo-100 text-indigo-700',
   generic: 'bg-gray-100 text-gray-700',
 };
 
@@ -28,6 +37,40 @@ interface DirectoryBrowserProps {
   onSelect: (dir: string, detected: DetectedSkillDir[]) => void;
   initialDir?: string;
   selectedDir?: string;
+}
+
+function visibilityLabel(status: ArtifactVisibilityStatus): string {
+  switch (status) {
+    case 'visible_in_app':
+      return 'Visivel no app';
+    case 'found_in_wrong_repository':
+      return 'Fora do diretorio oficial';
+    case 'found_in_legacy_repository':
+      return 'Repositorio legado';
+    case 'found_in_workspace_but_not_loaded_by_app':
+      return 'Nao carregado pelo app';
+    case 'found_but_unverifiable_for_app':
+      return 'Layout nao verificavel';
+    case 'missing_from_expected_repository':
+      return 'Ausente no repositorio esperado';
+  }
+}
+
+function visibilityBadge(status: ArtifactVisibilityStatus): string {
+  switch (status) {
+    case 'visible_in_app':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'found_in_wrong_repository':
+      return 'bg-amber-100 text-amber-700';
+    case 'found_in_legacy_repository':
+      return 'bg-slate-100 text-slate-700';
+    case 'found_in_workspace_but_not_loaded_by_app':
+      return 'bg-orange-100 text-orange-700';
+    case 'found_but_unverifiable_for_app':
+      return 'bg-indigo-100 text-indigo-700';
+    case 'missing_from_expected_repository':
+      return 'bg-red-100 text-red-700';
+  }
 }
 
 export function DirectoryBrowser({
@@ -38,6 +81,7 @@ export function DirectoryBrowser({
   const [currentDir, setCurrentDir] = useState('');
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [detected, setDetected] = useState<DetectedSkillDir[]>([]);
+  const [apps, setApps] = useState<WorkspaceAppInventory[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionDir[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -60,6 +104,7 @@ export function DirectoryBrowser({
   const navigateTo = useCallback(async (dir: string) => {
     setLoading(true);
     setDetected([]);
+    setApps([]);
     setError('');
     setPhase('browsing');
 
@@ -71,6 +116,7 @@ export function DirectoryBrowser({
       setScanning(true);
       const scanResult = await scanSkillDirs(result.currentDir);
       setDetected(scanResult.detected);
+      setApps(scanResult.apps);
     } catch (err) {
       setError(err instanceof Error ? err.message : `Nao foi possivel abrir ${dir}`);
       setCurrentDir(dir);
@@ -213,6 +259,46 @@ export function DirectoryBrowser({
                 {item.label} ({item.skillCount})
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {apps.some((app) => app.counts.found_in_wrong_repository > 0 || app.counts.found_in_legacy_repository > 0 || app.counts.found_but_unverifiable_for_app > 0) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+            <Sparkles className="h-4 w-4" />
+            Diagnostico de repositorios
+          </div>
+          <div className="mt-3 space-y-3">
+            {apps
+              .filter((app) => app.artifacts.some((artifact) => artifact.visibilityStatus !== 'visible_in_app'))
+              .map((app) => (
+                <div key={app.appId} className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-bold uppercase', TOOL_COLORS[app.appId] ?? TOOL_COLORS.generic)}>
+                      {app.appId}
+                    </span>
+                    <span className="text-xs font-semibold text-gray-800">{app.label}</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {app.artifacts
+                      .filter((artifact) => artifact.visibilityStatus !== 'visible_in_app')
+                      .slice(0, 3)
+                      .map((artifact) => (
+                        <div key={artifact.id} className="text-xs text-gray-600">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={cn('rounded-full px-2 py-0.5 font-semibold', visibilityBadge(artifact.visibilityStatus))}>
+                              {visibilityLabel(artifact.visibilityStatus)}
+                            </span>
+                            <span className="font-mono text-[11px] text-gray-700">{artifact.name}</span>
+                          </div>
+                          <p className="mt-1 break-all font-mono text-[11px] text-gray-500">{artifact.detectedPath}</p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-gray-400">Esperado: {artifact.expectedPath}</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
       )}

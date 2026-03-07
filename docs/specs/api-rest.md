@@ -19,11 +19,13 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 3. O error handler mapeia erros de dominio de forma deterministica, incluindo `WorkspaceSkillReferenceError -> 400`.
 4. `GET /api/skills/catalog` devolve apenas skills do provider, uma unica vez por nome.
 5. `GET /api/skills/catalog` aceita contexto opcional de destino (`workspaceFilePath`, `target`) para resolver `installState`, mas esse contexto nao altera a unicidade do catalogo.
-6. `GET /api/workspace` devolve `agents[]` com inventario local agrupado por target de deploy.
+6. `GET /api/workspace` devolve `agents[]` com inventario local agrupado por target de deploy e `apps[]` com diagnostico oficial por app/repositorio.
 7. `GET /api/workspace/registry` separa contadores de manifesto e disco local; `skillCount` permanece apenas como alias retrocompativel da contagem configurada.
 8. `PUT /api/workspace`, `POST /api/sync` e `GET /api/sync/stream` validam referencias do manifesto contra o provider antes de persistir ou sincronizar.
 9. `POST /api/deploy` aceita destino explicito via `workspaceFilePath` e `target`; quando omitidos, o comportamento legado pode usar fallback do workspace ativo.
 10. CORS so fica habilitado em modo dev.
+11. `GET /api/apps/catalog` expõe apenas apps do registro oficial e seus niveis de suporte.
+12. `POST /api/migrations/plan` e sempre dry-run e nunca escreve no disco.
 
 ## Comportamentos (Given/When/Then)
 
@@ -49,7 +51,19 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 
 - **Given**: Existe um workspace ativo em `/projeto/app`
 - **When**: `GET /api/workspace`
-- **Then**: A resposta inclui `manifest`, `targetDirectories`, `catalog` resumido e `agents[]` com skills locais agrupadas por target
+- **Then**: A resposta inclui `manifest`, `targetDirectories`, `catalog` resumido, `agents[]` com skills locais agrupadas por target e `apps[]` com o diagnostico oficial de repositorios por app
+
+### Cenario: Consultar catalogo oficial de apps
+
+- **Given**: O registro oficial conhece `codex`, `claude-code`, `cursor` e apps detect-only como `github-copilot`
+- **When**: `GET /api/apps/catalog`
+- **Then**: A resposta lista `supportLevel`, paths canonicos/legados e `docUrls` para cada app
+
+### Cenario: Planejar migracao entre apps
+
+- **Given**: Existe um workspace em `/projeto/app` com artefatos locais de `codex`
+- **When**: `POST /api/migrations/plan` com `{ "workspaceDir": "/projeto/app", "fromApp": "codex", "toApp": "claude-code", "skill": "fiscal" }`
+- **Then**: A resposta inclui um `AppMigrationPlan` com `items[]`, `lossiness`, `blockedReasons` e `manualSteps`, sem escrita local
 
 ### Cenario: Deploy com destino explicito
 
@@ -70,6 +84,7 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 | Metodo | Rota | Descricao | Sucesso | Erro |
 |--------|------|-----------|---------|------|
 | GET | `/api/health` | Status do provider, cache e configuracao | `{ data: HealthStatus }` | — |
+| GET | `/api/apps/catalog` | Catalogo oficial de apps/repositorios e nivel de suporte | `{ data: AgentAppCatalogItem[] }` | — |
 | GET | `/api/skills?q=&detailed=` | Listar ou detalhar skills do provider | `{ data: string[] \| SkillSummary[] }` | — |
 | GET | `/api/skills/catalog?q=&workspaceFilePath=&target=&type=&category=&tag=&installState=` | Catalogo cloud-first com contexto opcional de destino | `{ data: SkillsCatalog }` | — |
 | GET | `/api/skills/:name` | Obter `SkillPackage` completo | `{ data: SkillPackage }` | 404 |
@@ -79,7 +94,7 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 | GET | `/api/config` | Configuracao completa | `{ data: AhubConfig }` | — |
 | GET | `/api/cache` | Listar skills em cache | `{ data: string[] }` | — |
 | DELETE | `/api/cache` | Limpar cache | `{ data: { cleared: true } }` | — |
-| GET | `/api/workspace` | Workspace ativo ou explicito, com manifesto, diretorios e inventario por agente | `{ data: { manifest, filePath, workspaceDir, resolved, targetDirectories, catalog, agents } }` | — |
+| GET | `/api/workspace` | Workspace ativo ou explicito, com manifesto, diretorios, inventario por agente e diagnostico por app | `{ data: { manifest, filePath, workspaceDir, resolved, targetDirectories, catalog, agents, apps } }` | — |
 | PUT | `/api/workspace` | Salvar manifesto com validacao no provider | `{ data: { saved } }` | 400, 503 |
 | GET | `/api/workspace/registry` | Listar workspaces registrados com contadores separados | `{ data: WorkspaceRegistryEntry[] }` | — |
 | POST | `/api/workspace/registry` | Registrar ou criar workspace, com opcao de adotar skills locais | `{ data: { registered, created, detectedSkillCount, adoptedSkillCount, ignoredSkillNames } }` | 400, 503 |
@@ -87,7 +102,8 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 | PUT | `/api/workspace/active` | Definir workspace ativo | `{ data: { active } }` | 400 |
 | GET | `/api/workspace/suggestions` | Sugerir roots de workspace a partir de skills locais detectadas | `{ data: WorkspaceSuggestion[] }` | — |
 | GET | `/api/explorer/browse?dir=&hidden=` | Navegar diretorios | `{ data: { currentDir, entries } }` | 400 |
-| GET | `/api/explorer/scan?dir=` | Detectar diretorios locais de skills | `{ data: { baseDir, detected } }` | 400 |
+| GET | `/api/explorer/scan?dir=` | Detectar diretorios locais de skills e artefatos oficiais por app | `{ data: { baseDir, detected, artifacts, apps } }` | 400 |
+| POST | `/api/migrations/plan` | Gerar plano de migracao entre apps sem escrita | `{ data: AppMigrationPlan }` | 400 |
 | GET | `/api/explorer/suggestions` | Sugestoes iniciais de diretorio | `{ data: SuggestionDir[] }` | — |
 | POST | `/api/explorer/pick-directory` | Abrir seletor nativo de pasta | `{ data: { selectedDir } }` | 500 |
 | POST | `/api/deploy` | Instalar skills em um destino explicito ou legado | `{ data: { deployed[], failed[] } }` | 400 |
@@ -113,7 +129,9 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 - `GET /api/skills/catalog`: lista skills no provider e, quando ha destino explicito, observa o disco local apenas para resolver estado de instalacao.
 - `PUT`, `PATCH` e `DELETE /api/skills/:name`: alteram o backend de storage.
 - `POST /api/workspace/registry`: pode criar `ahub.workspace.json`; quando `localSkillStrategy=adopt`, tambem observa skills locais e consulta o provider para montar o manifesto inicial.
-- `GET /api/workspace`: le manifesto, diretorios de deploy e inventario local por agente.
+- `GET /api/workspace`: le manifesto, diretorios de deploy, inventario local por agente e diagnostico por app.
+- `GET /api/apps/catalog`: consulta apenas o registro oficial embutido.
+- `POST /api/migrations/plan`: le o workspace e o registro oficial para montar um plano sem escrita.
 - `PUT /api/workspace`: grava o manifesto no disco apenas apos validar referencias contra o provider.
 - `POST /api/deploy`: baixa skills do provider e escreve no diretorio de destino resolvido.
 - `POST /api/sync` e `GET /api/sync/stream`: validam o manifesto contra o provider antes de combinar fetch remoto e escrita local.

@@ -26,9 +26,11 @@ import { CreateWorkspaceDialog } from '../components/workspace/CreateWorkspaceDi
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { cn } from '../lib/utils';
 import type {
+  ArtifactVisibilityStatus,
   DeployTarget,
   WorkspaceAgentInventory,
   WorkspaceAgentSkillStatus,
+  WorkspaceAppInventory,
   WorkspaceRegistryEntry,
   WorkspaceSuggestion,
 } from '../api/types';
@@ -57,6 +59,19 @@ const AGENT_BADGE_STYLES: Record<DeployTarget, string> = {
   'claude-code': 'border-orange-200 bg-orange-50 text-orange-700',
   codex: 'border-blue-200 bg-blue-50 text-blue-700',
   cursor: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+};
+
+const APP_BADGE_STYLES: Record<string, string> = {
+  'claude-code': 'border-orange-200 bg-orange-50 text-orange-700',
+  codex: 'border-blue-200 bg-blue-50 text-blue-700',
+  cursor: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  windsurf: 'border-sky-200 bg-sky-50 text-sky-700',
+  cline: 'border-pink-200 bg-pink-50 text-pink-700',
+  continue: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+  'gemini-cli': 'border-lime-200 bg-lime-50 text-lime-700',
+  amp: 'border-rose-200 bg-rose-50 text-rose-700',
+  'github-copilot': 'border-slate-200 bg-slate-50 text-slate-700',
+  antigravity: 'border-indigo-200 bg-indigo-50 text-indigo-700',
 };
 
 export function WorkspacePage() {
@@ -460,6 +475,8 @@ export function WorkspacePage() {
                       filteredAgentSkills={filteredAgentSkills}
                     />
 
+                    <WorkspaceAppSection apps={workspace.data?.apps ?? []} />
+
                     <div className="flex w-fit items-center gap-1 rounded-lg bg-gray-100 p-1">
                       <button
                         onClick={() => setEditorMode('form')}
@@ -738,6 +755,128 @@ function WorkspaceAgentSection({
   );
 }
 
+function WorkspaceAppSection({ apps }: { apps: WorkspaceAppInventory[] }) {
+  const relevantApps = apps.filter((app) => app.counts.total > 0 || app.supportLevel === 'official_app_unverified_layout');
+
+  if (relevantApps.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-200 px-5 py-4">
+        <h3 className="text-sm font-semibold text-gray-900">Diagnostico de repositorios por app</h3>
+        <p className="mt-1 text-xs text-gray-400">
+          Este bloco explica quando um artefato esta no lugar oficial, em um repositorio legado ou fora do diretorio que o app realmente le.
+        </p>
+      </div>
+
+      <div className="space-y-4 p-5">
+        {relevantApps.map((app) => (
+          <div key={app.appId} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', APP_BADGE_STYLES[app.appId] ?? 'border-gray-200 bg-gray-50 text-gray-700')}>
+                    {app.label}
+                  </span>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                    {app.supportLevel}
+                  </span>
+                  {app.deployTarget && (
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                      deploy target {app.deployTarget}
+                    </span>
+                  )}
+                </div>
+
+                {app.canonicalPaths.length > 0 && (
+                  <>
+                    <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Paths oficiais</p>
+                    {app.canonicalPaths.map((entry) => (
+                      <p key={`${app.appId}-canonical-${entry}`} className="mt-1 break-all font-mono text-xs text-gray-500">
+                        {entry}
+                      </p>
+                    ))}
+                  </>
+                )}
+
+                {app.legacyPaths.length > 0 && (
+                  <>
+                    <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Paths legados</p>
+                    {app.legacyPaths.map((entry) => (
+                      <p key={`${app.appId}-legacy-${entry}`} className="mt-1 break-all font-mono text-xs text-gray-500">
+                        {entry}
+                      </p>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <MiniCount label="Visiveis" value={app.counts.visible_in_app} tone="emerald" />
+                <MiniCount label="Legado" value={app.counts.found_in_legacy_repository} tone="slate" />
+                <MiniCount label="Fora do repo" value={app.counts.found_in_wrong_repository} tone="amber" />
+                <MiniCount label="Nao carregado" value={app.counts.found_in_workspace_but_not_loaded_by_app} tone="orange" />
+                <MiniCount label="Nao verificavel" value={app.counts.found_but_unverifiable_for_app} tone="indigo" />
+                <MiniCount label="Ausente" value={app.counts.missing_from_expected_repository} tone="red" />
+              </div>
+            </div>
+
+            {app.artifacts.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {app.artifacts.map((artifact) => (
+                  <div key={artifact.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-sm font-semibold text-gray-900">{artifact.name}</span>
+                          <AppArtifactStatusBadge status={artifact.visibilityStatus} />
+                          <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                            {artifact.artifactKind}
+                          </span>
+                          {artifact.migratable && (
+                            <span className="rounded bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                              migracao {artifact.lossiness}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-2 break-all font-mono text-xs text-gray-500">{artifact.detectedPath}</p>
+                        <p className="mt-1 break-all font-mono text-xs text-gray-400">Esperado: {artifact.expectedPath}</p>
+                      </div>
+
+                      {artifact.visibilityStatus !== 'visible_in_app' && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          {artifact.visibilityStatus === 'found_in_wrong_repository'
+                            ? 'Mover ou copiar para o path oficial.'
+                            : artifact.visibilityStatus === 'found_in_legacy_repository'
+                              ? 'Repositorio legado detectado; prefira o path oficial novo.'
+                              : artifact.visibilityStatus === 'found_but_unverifiable_for_app'
+                                ? 'Somente documentacao-base encontrada; sem recomendacao automatica de move.'
+                                : 'Revise o path oficial antes de sincronizar.'}
+                        </div>
+                      )}
+                    </div>
+                    {artifact.migratable && (
+                      <p className="mt-3 text-xs text-gray-500">
+                        Planeje a migracao entre apps via CLI/MCP quando quiser converter este artefato para outro repositorio oficial.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-6 text-sm text-gray-500">
+                Nenhum artefato local detectado para este app neste workspace.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function EmptyWorkspaceState({
   suggestions,
   loadingSuggestions,
@@ -874,6 +1013,32 @@ function SuggestionPanel({
   );
 }
 
+function MiniCount({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'emerald' | 'slate' | 'amber' | 'orange' | 'indigo' | 'red';
+}) {
+  const tones: Record<typeof tone, string> = {
+    emerald: 'bg-emerald-50 text-emerald-700',
+    slate: 'bg-slate-100 text-slate-700',
+    amber: 'bg-amber-50 text-amber-700',
+    orange: 'bg-orange-50 text-orange-700',
+    indigo: 'bg-indigo-50 text-indigo-700',
+    red: 'bg-red-50 text-red-700',
+  };
+
+  return (
+    <div className={cn('rounded-lg border border-transparent px-3 py-2 text-xs font-medium', tones[tone])}>
+      <p className="uppercase tracking-wide opacity-80">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function SummaryCard({
   title,
   value,
@@ -908,6 +1073,41 @@ function AgentSkillStatusBadge({ status }: { status: WorkspaceAgentSkillStatus }
     },
     missing_in_provider: {
       label: 'Ausente no provider',
+      className: 'bg-red-100 text-red-700',
+    },
+  };
+
+  return (
+    <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', meta[status].className)}>
+      {meta[status].label}
+    </span>
+  );
+}
+
+function AppArtifactStatusBadge({ status }: { status: ArtifactVisibilityStatus }) {
+  const meta: Record<ArtifactVisibilityStatus, { label: string; className: string }> = {
+    visible_in_app: {
+      label: 'Visivel no app',
+      className: 'bg-emerald-100 text-emerald-700',
+    },
+    found_in_wrong_repository: {
+      label: 'Fora do repo oficial',
+      className: 'bg-amber-100 text-amber-700',
+    },
+    found_in_legacy_repository: {
+      label: 'Repositorio legado',
+      className: 'bg-slate-100 text-slate-700',
+    },
+    found_in_workspace_but_not_loaded_by_app: {
+      label: 'Nao carregado',
+      className: 'bg-orange-100 text-orange-700',
+    },
+    found_but_unverifiable_for_app: {
+      label: 'Nao verificavel',
+      className: 'bg-indigo-100 text-indigo-700',
+    },
+    missing_from_expected_repository: {
+      label: 'Ausente no path oficial',
       className: 'bg-red-100 text-red-700',
     },
   };

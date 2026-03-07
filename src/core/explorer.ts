@@ -11,10 +11,12 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { flattenWorkspaceDirectoryHints } from './app-registry.js';
+import { detectAppArtifacts } from './app-artifacts.js';
 import { isWSL, normalizeExternalPath, normalizePath, toWindowsPath } from './wsl.js';
 import { ALL_MARKER_FILES } from './types.js';
 import { findWorkspaceManifestInDirectory } from './workspace.js';
-import type { DeployTarget, DetectedLocalSkill } from './types.js';
+import type { DetectedLocalSkill } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,38 +32,7 @@ export const WELL_KNOWN_SKILL_DIRS: ReadonlyArray<{
   label: string;
   relativePath: string;
   tool: string;
-}> = [
-  // Claude Code
-  { label: 'Claude Code commands',  relativePath: '.claude/commands',  tool: 'claude-code' },
-  { label: 'Claude Code skills',    relativePath: '.claude/skills',    tool: 'claude-code' },
-  { label: 'Claude Code agents',    relativePath: '.claude/agents',    tool: 'claude-code' },
-  { label: 'Claude Code prompts',   relativePath: '.claude/prompts',   tool: 'claude-code' },
-
-  // Codex
-  { label: 'Codex skills',          relativePath: '.codex/skills',     tool: 'codex' },
-  { label: 'Codex agents',          relativePath: '.codex/agents',     tool: 'codex' },
-  { label: 'Codex prompts',         relativePath: '.codex/prompts',    tool: 'codex' },
-
-  // Cursor
-  { label: 'Cursor rules',          relativePath: '.cursor/rules',     tool: 'cursor' },
-  { label: 'Cursor agents',         relativePath: '.cursor/agents',    tool: 'cursor' },
-  { label: 'Cursor prompts',        relativePath: '.cursor/prompts',   tool: 'cursor' },
-
-  // Generic / ahub
-  { label: 'Skills directory',      relativePath: '.skills',           tool: 'generic' },
-
-  // Windsurf
-  { label: 'Windsurf rules',        relativePath: '.windsurf/rules',   tool: 'windsurf' },
-
-  // Aider
-  { label: 'Aider conventions',     relativePath: '.aider/conventions', tool: 'aider' },
-
-  // Cline
-  { label: 'Cline rules',           relativePath: '.cline/rules',      tool: 'cline' },
-
-  // Continue
-  { label: 'Continue prompts',      relativePath: '.continue/prompts', tool: 'continue' },
-];
+}> = flattenWorkspaceDirectoryHints();
 
 // ---------------------------------------------------------------------------
 // Detected skill directory result
@@ -78,12 +49,6 @@ export interface DetectedSkillDir {
   /** Number of skill-like files found. */
   skillCount: number;
 }
-
-const TOOL_TO_TARGET: Partial<Record<string, DeployTarget>> = {
-  'claude-code': 'claude-code',
-  codex: 'codex',
-  cursor: 'cursor',
-};
 
 /** A suggested workspace root inferred from detected local skills. */
 export interface WorkspaceSuggestion {
@@ -113,24 +78,26 @@ export interface WorkspaceSuggestion {
  */
 export async function scanForSkillDirs(baseDir: string): Promise<DetectedSkillDir[]> {
   const normalized = normalizePath(baseDir);
-  const results: DetectedSkillDir[] = [];
+  const artifacts = await detectAppArtifacts(normalized);
+  const grouped = new Map<string, DetectedSkillDir>();
 
-  for (const pattern of WELL_KNOWN_SKILL_DIRS) {
-    const fullPath = path.join(normalized, pattern.relativePath);
-    const detectedSkills = await listSkillEntriesInDir(fullPath, pattern.label, pattern.tool);
-    const count = detectedSkills.length;
-
-    if (count > 0) {
-      results.push({
-        absolutePath: fullPath,
-        label: pattern.label,
-        tool: pattern.tool,
-        skillCount: count,
-      });
+  for (const artifact of artifacts) {
+    const key = `${artifact.appId}::${artifact.repositoryPath}::${artifact.label}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.skillCount += 1;
+      continue;
     }
+
+    grouped.set(key, {
+      absolutePath: artifact.repositoryPath,
+      label: artifact.label,
+      tool: artifact.appId,
+      skillCount: 1,
+    });
   }
 
-  return results;
+  return [...grouped.values()].sort((a, b) => a.absolutePath.localeCompare(b.absolutePath) || a.tool.localeCompare(b.tool));
 }
 
 /**
@@ -138,15 +105,20 @@ export async function scanForSkillDirs(baseDir: string): Promise<DetectedSkillDi
  */
 export async function detectLocalSkills(baseDir: string): Promise<DetectedLocalSkill[]> {
   const normalized = normalizePath(baseDir);
-  const results: DetectedLocalSkill[] = [];
+  const artifacts = await detectAppArtifacts(normalized);
 
-  for (const pattern of WELL_KNOWN_SKILL_DIRS) {
-    const fullPath = path.join(normalized, pattern.relativePath);
-    const entries = await listSkillEntriesInDir(fullPath, pattern.label, pattern.tool);
-    results.push(...entries);
-  }
-
-  return results;
+  return artifacts
+    .filter((artifact) => artifact.visibilityStatus === 'visible_in_app')
+    .filter((artifact) => artifact.target)
+    .filter((artifact) => artifact.artifactKind !== 'instruction_file')
+    .map((artifact) => ({
+      ...artifact,
+      tool: artifact.appId,
+      directoryPath: artifact.repositoryPath,
+      absolutePath: artifact.detectedPath,
+      ...(artifact.target ? { target: artifact.target } : {}),
+    }))
+    .sort((a, b) => a.detectedPath.localeCompare(b.detectedPath));
 }
 
 /**
@@ -154,21 +126,17 @@ export async function detectLocalSkills(baseDir: string): Promise<DetectedLocalS
  * inside a directory. Counts both direct .md files and subdirectories with marker files.
  */
 async function countSkillFiles(dir: string): Promise<number> {
-  return (await listSkillEntriesInDir(dir, 'local', 'generic')).length;
+  return countGenericEntriesInDir(dir);
 }
 
-async function listSkillEntriesInDir(
-  dir: string,
-  label: string,
-  tool: string,
-): Promise<DetectedLocalSkill[]> {
+async function countGenericEntriesInDir(dir: string): Promise<number> {
   try {
     await access(dir);
   } catch {
-    return [];
+    return 0;
   }
 
-  const results: DetectedLocalSkill[] = [];
+  let count = 0;
   try {
     const entries = await readdir(dir, { withFileTypes: true });
 
@@ -178,14 +146,7 @@ async function listSkillEntriesInDir(
         for (const marker of ALL_MARKER_FILES) {
           try {
             await access(path.join(dir, entry.name, marker));
-            results.push({
-              name: entry.name,
-              label,
-              tool,
-              directoryPath: dir,
-              absolutePath: path.join(dir, entry.name),
-              target: TOOL_TO_TARGET[tool],
-            });
+            count += 1;
             break;
           } catch {
             // no marker in this subdir
@@ -193,21 +154,14 @@ async function listSkillEntriesInDir(
         }
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         // Direct .md files (e.g. claude commands)
-        results.push({
-          name: entry.name.replace(/\.md$/i, ''),
-          label,
-          tool,
-          directoryPath: dir,
-          absolutePath: path.join(dir, entry.name),
-          target: TOOL_TO_TARGET[tool],
-        });
+        count += 1;
       }
     }
   } catch {
     // Cannot read directory
   }
 
-  return results;
+  return count;
 }
 
 // ---------------------------------------------------------------------------

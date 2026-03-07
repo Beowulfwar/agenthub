@@ -2,7 +2,7 @@
 
 CLI + MCP Server para gerenciamento centralizado de skills, prompts e tarefas de agentes AI.
 
-Suporta **Git** e **Google Drive** como backends de armazenamento, permitindo sync entre ambientes e deploy para diferentes ferramentas (Claude Code, Codex, Cursor).
+Suporta **Git** e **Google Drive** como backends de armazenamento, permitindo sync entre ambientes e deploy para diferentes ferramentas (Claude Code, Codex, Cursor), alem de diagnostico oficial de repositorios locais para apps como Windsurf, Cline, Continue, Gemini CLI, Amp, GitHub Copilot e Antigravity.
 
 ## Quick Start
 
@@ -43,6 +43,8 @@ ahub deploy --all --target claude-code
 | `ahub import <path>` | Importar skill de pasta ou zip |
 | `ahub export <name>` | Exportar skill como pasta ou zip |
 | `ahub migrate --to <provider>` | Migrar entre Git e Drive |
+| `ahub doctor --workspace <dir>` | Auditar repositorios locais por app |
+| `ahub migrate-app --from <app> --to <app>` | Planejar ou executar migracao entre apps |
 | `ahub config set/get` | Configurar opcoes |
 | `ahub health` | Verificar conectividade |
 | `ahub mcp` | Iniciar servidor MCP |
@@ -54,6 +56,15 @@ ahub deploy --all --target claude-code
 | `claude-code` | `~/.claude/commands/<name>.md` | SKILL.md completo |
 | `codex` | `~/.codex/skills/<name>/` | Pasta completa |
 | `cursor` | `.cursor/rules/<name>.md` | Body sem frontmatter |
+
+## Registro Oficial de Apps
+
+O Agent Hub agora mantem um catalogo oficial separado para diagnostico local de repositorios por app. Esse catalogo nao amplia os `deploy targets`; ele descreve onde cada app realmente le artefatos locais, quais paths sao canonicos, quais sao legados e quando uma migracao entre apps e apenas planejavel.
+
+- `codex`, `claude-code`, `cursor`: deploy executavel + diagnostico
+- `windsurf`, `cline`, `continue`: diagnostico oficial + migracao de regras simples
+- `gemini-cli`, `amp`, `github-copilot`: diagnostico oficial e plano de migracao, sem escrita automatica nesta versao
+- `antigravity`: app oficial conhecido, mas sem layout local verificavel para automacao
 
 ## MCP Server
 
@@ -132,7 +143,7 @@ npm test                     # Rodar testes
 
 O script `npm run dev:stack` usa `scripts/dev-stack.sh` e faz restart limpo do ambiente local:
 
-- sobe a API em `3737` e a UI em `5173` por padrao
+- sobe a API em `3837` e a UI em `5173` por padrao
 - backend roda em watch e recarrega automaticamente ao salvar alteracoes locais
 - detecta portas ocupadas, encerra o processo anterior e reinicia os servicos
 - em ambientes WSL, usa um `TMPDIR` local para evitar falhas do `tsx` em paths montados
@@ -141,7 +152,7 @@ O script `npm run dev:stack` usa `scripts/dev-stack.sh` e faz restart limpo do a
 Tambem aceita sobrescrever as portas e o host da UI:
 
 ```bash
-BACKEND_PORT=3738 FRONTEND_PORT=5174 FRONTEND_HOST=127.0.0.1 npm run dev:stack
+BACKEND_PORT=3838 FRONTEND_PORT=5174 FRONTEND_HOST=127.0.0.1 npm run dev:stack
 ```
 
 ## Documentation

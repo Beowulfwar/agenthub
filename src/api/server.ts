@@ -48,7 +48,7 @@ export interface ServerOptions {
  * Returns a handle with the server instance and resolved port.
  */
 export async function startApiServer(options: ServerOptions = {}) {
-  const { port = 3737, staticDir, devMode = false } = options;
+  const { port = 3837, staticDir, devMode = false } = options;
 
   const app = createApiApp();
 

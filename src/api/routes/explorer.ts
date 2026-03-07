@@ -15,6 +15,7 @@ import {
   isValidDirectory,
   pickDirectory,
 } from '../../core/explorer.js';
+import { detectAppArtifacts, buildWorkspaceAppInventories } from '../../core/app-artifacts.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
 
 export function explorerRoutes(): Hono {
@@ -49,10 +50,14 @@ export function explorerRoutes(): Hono {
     }
 
     const detected = await scanForSkillDirs(normalized);
+    const artifacts = await detectAppArtifacts(normalized);
+    const apps = await buildWorkspaceAppInventories(normalized);
     return c.json({
       data: {
         baseDir: normalized,
         detected,
+        artifacts,
+        apps,
       },
     });
   });

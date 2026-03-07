@@ -18,6 +18,16 @@ export type {
   SkillMetadata,
   SkillPackage,
   DeployTarget,
+  AgentAppId,
+  ArtifactKind,
+  ArtifactScope,
+  SupportLevel,
+  ArtifactVisibilityStatus,
+  ArtifactLegacyStatus,
+  ArtifactLossiness,
+  AgentRepositoryLocation,
+  AgentAppCatalogItem,
+  DetectedAppArtifact,
   GitConfig,
   DriveConfig,
   LocalConfig,
@@ -28,6 +38,10 @@ export type {
   WorkspaceSkillEntry,
   WorkspaceTargetGroup,
   WorkspaceManifest,
+  WorkspaceAppArtifact,
+  WorkspaceAppInventory,
+  MigrationPlanItem,
+  AppMigrationPlan,
   SyncDeployedEntry,
   SyncFailedEntry,
   SyncResult,
@@ -42,6 +56,10 @@ export {
   ALL_MARKER_FILES,
   MARKER_TO_TYPE,
 } from './core/types.js';
+
+export { listAgentApps } from './core/app-registry.js';
+export { detectAppArtifacts, buildWorkspaceAppInventories } from './core/app-artifacts.js';
+export { planAppMigration, executeAppMigration } from './core/app-migration.js';
 
 // ---------------------------------------------------------------------------
 // Core — Errors

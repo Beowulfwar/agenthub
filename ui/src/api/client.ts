@@ -14,6 +14,8 @@ import type {
   PatchSkillRequest,
   CloneResult,
   RenameResult,
+  AgentAppCatalogItem,
+  AppMigrationPlan,
   DeployRequest,
   DeployResult,
   SyncRequest,
@@ -133,6 +135,7 @@ export async function fetchWorkspace(path?: string): Promise<WorkspaceData> {
     ...data,
     workspaceDir: data.workspaceDir ?? (data.filePath ? dirname(data.filePath) : null),
     agents: data.agents ?? [],
+    apps: data.apps ?? [],
   };
 }
 
@@ -237,6 +240,20 @@ export async function browseDirectory(dir?: string): Promise<BrowseResult> {
 
 export async function scanSkillDirs(dir: string): Promise<ScanResult> {
   return unwrap(await api.get<ApiSuccess<ScanResult>>('/explorer/scan', { params: { dir } }));
+}
+
+export async function fetchAppsCatalog(): Promise<AgentAppCatalogItem[]> {
+  return unwrap(await api.get<ApiSuccess<AgentAppCatalogItem[]>>('/apps/catalog'));
+}
+
+export async function planAppMigrationApi(body: {
+  workspaceDir?: string;
+  fromApp: AgentAppCatalogItem['appId'];
+  toApp: AgentAppCatalogItem['appId'];
+  skill?: string;
+  all?: boolean;
+}): Promise<AppMigrationPlan> {
+  return unwrap(await api.post<ApiSuccess<AppMigrationPlan>>('/migrations/plan', body));
 }
 
 export async function fetchSuggestions(): Promise<SuggestionDir[]> {

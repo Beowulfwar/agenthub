@@ -1,6 +1,8 @@
 import path from 'node:path';
+import os from 'node:os';
 
 import type {
+  AgentAppCatalogItem,
   CloudSkillCatalogItem,
   CloudSkillInstallState,
   ContentType,
@@ -16,6 +18,7 @@ import type {
   WorkspaceManifest,
   WorkspaceSkillEntry,
 } from './types.js';
+import { listAgentApps } from './app-registry.js';
 import { detectLocalSkills } from './explorer.js';
 import { WorkspaceSkillReferenceError } from './errors.js';
 import { extractSkillExtensions } from './skill.js';
@@ -307,8 +310,14 @@ export async function buildWorkspaceAgentInventories(
   const { workspaceDir, manifest, targetDirectories, providerIndex } = params;
   const resolved = manifest ? resolveManifestSkills(manifest) : [];
   const detectedLocalSkills = dedupeDetectedLocalSkills(await detectLocalSkills(workspaceDir));
+  const appCatalog = new Map(
+    listAgentApps()
+      .filter((app): app is AgentAppCatalogItem & { deployTarget: DeployTarget } => Boolean(app.deployTarget))
+      .map((app) => [app.deployTarget, app] as const),
+  );
 
   return targetDirectories.map((targetDirectory) => {
+    const appInfo = appCatalog.get(targetDirectory.target);
     const configuredNames = new Set(
       resolved
         .filter((skill) => skill.targets.includes(targetDirectory.target))
@@ -360,6 +369,13 @@ export async function buildWorkspaceAgentInventories(
       rootPath: targetDirectory.rootPath,
       skillPath: targetDirectory.directories.skill,
       exists: targetDirectory.exists,
+      ...(appInfo
+        ? {
+            appId: appInfo.appId,
+            canonicalPaths: resolveCatalogPaths(workspaceDir, appInfo.canonicalLocations),
+            legacyPaths: resolveCatalogPaths(workspaceDir, appInfo.legacyLocations),
+          }
+        : {}),
       counts,
       skills,
     } satisfies WorkspaceAgentInventory;
@@ -516,6 +532,22 @@ function groupDetectedLocalSkills(entries: DetectedLocalSkill[]): Map<string, De
   }
 
   return grouped;
+}
+
+function resolveCatalogPaths(
+  workspaceDir: string,
+  locations: Array<{ scope: 'workspace' | 'user' | 'global'; relativePath: string }>,
+): string[] {
+  return [...new Set(locations.map((location) => {
+    switch (location.scope) {
+      case 'workspace':
+        return path.join(workspaceDir, location.relativePath);
+      case 'user':
+        return path.join(os.homedir(), location.relativePath);
+      case 'global':
+        return path.resolve(location.relativePath);
+    }
+  }))].sort();
 }
 
 function lastPathSegment(fullPath: string): string {

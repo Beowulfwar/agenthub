@@ -19,6 +19,64 @@ export interface ApiErrorResponse {
   error: ApiErrorPayload;
 }
 
+export type AgentAppId =
+  | 'codex'
+  | 'claude-code'
+  | 'cursor'
+  | 'windsurf'
+  | 'cline'
+  | 'continue'
+  | 'gemini-cli'
+  | 'amp'
+  | 'github-copilot'
+  | 'antigravity';
+
+export type ArtifactKind =
+  | 'skill_package'
+  | 'command_file'
+  | 'rule_file'
+  | 'instruction_file'
+  | 'subagent_file'
+  | 'prompt_file'
+  | 'unknown';
+
+export type ArtifactScope = 'workspace' | 'user' | 'global';
+export type SupportLevel = 'official' | 'official_but_detect_only' | 'official_app_unverified_layout';
+export type ArtifactVisibilityStatus =
+  | 'visible_in_app'
+  | 'found_in_wrong_repository'
+  | 'found_in_legacy_repository'
+  | 'found_in_workspace_but_not_loaded_by_app'
+  | 'found_but_unverifiable_for_app'
+  | 'missing_from_expected_repository';
+export type ArtifactLegacyStatus = 'canonical' | 'legacy' | 'wrong_repository' | 'unverifiable' | 'not_applicable';
+export type ArtifactLossiness = 'lossless' | 'lossy_with_explicit_warning' | 'not_migratable';
+
+export interface AgentRepositoryLocation {
+  id: string;
+  label: string;
+  artifactKind: ArtifactKind;
+  scope: ArtifactScope;
+  relativePath: string;
+  canonical: boolean;
+}
+
+export interface AgentAppCatalogItem {
+  appId: AgentAppId;
+  label: string;
+  artifactKinds: ArtifactKind[];
+  canonicalLocations: AgentRepositoryLocation[];
+  legacyLocations: AgentRepositoryLocation[];
+  precedence: ArtifactScope[];
+  workspaceRelative: string[];
+  userRelative: string[];
+  readStrategy: string;
+  writeStrategy: string;
+  supportLevel: SupportLevel;
+  docUrls: string[];
+  deployTarget?: DeployTarget;
+}
+
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
@@ -98,6 +156,39 @@ export interface DetectedLocalSkill {
   tool: string;
   directoryPath: string;
   absolutePath: string;
+  target?: DeployTarget;
+  appId?: AgentAppId;
+  appLabel?: string;
+  artifactKind?: ArtifactKind;
+  scope?: ArtifactScope;
+  supportLevel?: SupportLevel;
+  detectedPath?: string;
+  expectedPath?: string;
+  repositoryPath?: string;
+  visibilityStatus?: ArtifactVisibilityStatus;
+  legacyStatus?: ArtifactLegacyStatus;
+  migratable?: boolean;
+  lossiness?: ArtifactLossiness;
+  sourceDocs?: string[];
+}
+
+export interface DetectedAppArtifact {
+  id: string;
+  name: string;
+  label: string;
+  appId: AgentAppId;
+  appLabel: string;
+  artifactKind: ArtifactKind;
+  scope: ArtifactScope;
+  supportLevel: SupportLevel;
+  detectedPath: string;
+  expectedPath: string;
+  repositoryPath: string;
+  visibilityStatus: ArtifactVisibilityStatus;
+  legacyStatus: ArtifactLegacyStatus;
+  migratable: boolean;
+  lossiness: ArtifactLossiness;
+  sourceDocs: string[];
   target?: DeployTarget;
 }
 
@@ -243,6 +334,7 @@ export interface WorkspaceData {
   resolved: ResolvedSkill[];
   targetDirectories: DeployTargetDirectory[];
   agents: WorkspaceAgentInventory[];
+  apps: WorkspaceAppInventory[];
   catalog?: WorkspaceCatalogEntry | null;
   error?: string;
 }
@@ -325,6 +417,37 @@ export interface WorkspaceAgentInventory {
   exists: boolean;
   counts: Record<WorkspaceAgentSkillStatus, number> & { total: number };
   skills: WorkspaceAgentSkill[];
+  appId?: AgentAppId;
+  canonicalPaths?: string[];
+  legacyPaths?: string[];
+}
+
+export interface WorkspaceAppArtifact {
+  id: string;
+  name: string;
+  label: string;
+  artifactKind: ArtifactKind;
+  detectedPath: string;
+  expectedPath: string;
+  repositoryPath: string;
+  visibilityStatus: ArtifactVisibilityStatus;
+  legacyStatus: ArtifactLegacyStatus;
+  migratable: boolean;
+  lossiness: ArtifactLossiness;
+  sourceDocs: string[];
+  target?: DeployTarget;
+}
+
+export interface WorkspaceAppInventory {
+  appId: AgentAppId;
+  label: string;
+  supportLevel: SupportLevel;
+  deployTarget?: DeployTarget;
+  canonicalPaths: string[];
+  legacyPaths: string[];
+  docUrls: string[];
+  counts: Record<ArtifactVisibilityStatus, number> & { total: number };
+  artifacts: WorkspaceAppArtifact[];
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +505,8 @@ export interface DetectedSkillDir {
 export interface ScanResult {
   baseDir: string;
   detected: DetectedSkillDir[];
+  artifacts: DetectedAppArtifact[];
+  apps: WorkspaceAppInventory[];
 }
 
 export interface SuggestionDir {
@@ -401,6 +526,33 @@ export interface RegisterWorkspaceResult {
   detectedSkillCount: number;
   adoptedSkillCount: number;
   ignoredSkillNames: string[];
+}
+
+export interface MigrationPlanItem {
+  name: string;
+  sourcePath: string;
+  sourceKind: ArtifactKind;
+  targetPath: string;
+  targetKind: ArtifactKind;
+  action: 'copy' | 'generate' | 'manual';
+  migratable: boolean;
+  lossiness: ArtifactLossiness;
+  warnings: string[];
+  blockedReasons: string[];
+  generatedFiles: string[];
+  manualSteps: string[];
+}
+
+export interface AppMigrationPlan {
+  fromApp: AgentAppId;
+  toApp: AgentAppId;
+  workspaceDir: string;
+  executable: boolean;
+  plannedCount: number;
+  blockedCount: number;
+  items: MigrationPlanItem[];
+  blockedReasons: string[];
+  manualSteps: string[];
 }
 
 // ---------------------------------------------------------------------------

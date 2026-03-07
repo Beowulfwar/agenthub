@@ -15,7 +15,7 @@ import chalk from 'chalk';
 export function createUiCommand(): Command {
   return new Command('ui')
     .description('Start the web UI dashboard')
-    .option('-p, --port <port>', 'Port to listen on', '3737')
+    .option('-p, --port <port>', 'Port to listen on', '3837')
     .option('--no-open', 'Do not open browser automatically')
     .option('--dev', 'Dev mode: API only, CORS enabled for Vite')
     .action(async (opts) => {

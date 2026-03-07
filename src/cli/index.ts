@@ -30,6 +30,8 @@ import { createCloneCommand } from './commands/clone.js';
 import { createRenameCommand } from './commands/rename.js';
 import { createInfoCommand } from './commands/info.js';
 import { createWorkspaceCommand } from './commands/workspace.js';
+import { createDoctorCommand } from './commands/doctor.js';
+import { createMigrateAppCommand } from './commands/migrate-app.js';
 
 /**
  * Create the top-level Commander program with every sub-command
@@ -64,6 +66,8 @@ export function createCli(): Command {
   program.addCommand(createRenameCommand());
   program.addCommand(createInfoCommand());
   program.addCommand(createWorkspaceCommand());
+  program.addCommand(createDoctorCommand());
+  program.addCommand(createMigrateAppCommand());
 
   // MCP sub-command — starts the Model Context Protocol server.
   program

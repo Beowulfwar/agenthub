@@ -28,6 +28,7 @@ import {
   loadProviderSkillIndex,
   validateWorkspaceManifestSkills,
 } from '../../core/workspace-catalog.js';
+import { buildWorkspaceAppInventories } from '../../core/app-artifacts.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
 import { createProvider } from '../../storage/factory.js';
 
@@ -232,6 +233,7 @@ export function workspaceRoutes(): Hono {
           resolved: [],
           targetDirectories: [],
           agents: [],
+          apps: [],
         },
       });
     }
@@ -256,8 +258,9 @@ export function workspaceRoutes(): Hono {
         targetDirectories,
         providerIndex,
       });
+      const apps = await buildWorkspaceAppInventories(workspaceDir);
       return c.json({
-        data: { manifest, filePath, workspaceDir, resolved, targetDirectories, agents, catalog },
+        data: { manifest, filePath, workspaceDir, resolved, targetDirectories, agents, apps, catalog },
       });
     } catch (err) {
       // File might not exist anymore — return gracefully
@@ -275,6 +278,7 @@ export function workspaceRoutes(): Hono {
         targetDirectories,
         providerIndex,
       });
+      const apps = await buildWorkspaceAppInventories(workspaceDir);
       return c.json({
         data: {
           manifest: null,
@@ -283,6 +287,7 @@ export function workspaceRoutes(): Hono {
           resolved: [],
           targetDirectories,
           agents,
+          apps,
           catalog,
           error: loadError,
         },
