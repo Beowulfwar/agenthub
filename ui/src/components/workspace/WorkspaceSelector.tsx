@@ -101,7 +101,19 @@ export function WorkspaceSelector() {
                       </div>
                       <p className="truncate font-mono text-xs text-gray-400">{entry.workspaceDir}</p>
                       {!entry.error && (
-                        <p className="text-xs text-gray-500">{entry.skillCount} skill{entry.skillCount !== 1 ? 's' : ''}</p>
+                        <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-600">
+                            {entry.configuredSkillCount} configurada{entry.configuredSkillCount === 1 ? '' : 's'}
+                          </span>
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">
+                            {entry.detectedSkillCount} local
+                          </span>
+                          {entry.driftCount > 0 && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                              {entry.driftCount} drift
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                     <button

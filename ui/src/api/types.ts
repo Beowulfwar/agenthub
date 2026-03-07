@@ -44,6 +44,36 @@ export interface SkillSummary {
   fileCount?: number;
 }
 
+export type WorkspaceCatalogSkillStatus =
+  | 'configured_and_detected'
+  | 'configured_only'
+  | 'detected_only'
+  | 'missing_in_provider';
+
+export interface WorkspaceCatalogSkill {
+  name: string;
+  type: 'skill' | 'prompt' | 'subagent' | null;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  configuredTargets: DeployTarget[];
+  configured: boolean;
+  detectedLocally: boolean;
+  existsInProvider: boolean;
+  status: WorkspaceCatalogSkillStatus;
+  detectedTools: string[];
+}
+
+export interface DetectedLocalSkill {
+  name: string;
+  label: string;
+  tool: string;
+  directoryPath: string;
+  absolutePath: string;
+  target?: DeployTarget;
+}
+
 export interface SkillMetadata {
   title?: string;
   description?: string;
@@ -141,6 +171,7 @@ export interface DeployResult {
 export interface WorkspaceSkillEntry {
   name: string;
   targets?: DeployTarget[];
+  source?: string;
 }
 
 export interface WorkspaceTargetGroup {
@@ -182,6 +213,7 @@ export interface WorkspaceData {
   workspaceDir: string | null;
   resolved: ResolvedSkill[];
   targetDirectories: DeployTargetDirectory[];
+  catalog?: WorkspaceCatalogEntry | null;
   error?: string;
 }
 
@@ -192,6 +224,28 @@ export interface WorkspaceRegistryEntry {
   manifest: WorkspaceManifest | null;
   isActive: boolean;
   skillCount: number;
+  configuredSkillCount: number;
+  detectedSkillCount: number;
+  configuredOnlyCount: number;
+  detectedOnlyCount: number;
+  missingInProviderCount: number;
+  driftCount: number;
+  error?: string;
+}
+
+export interface WorkspaceCatalogEntry {
+  filePath: string;
+  workspaceDir: string;
+  workspaceName: string;
+  isActive: boolean;
+  configuredSkillCount: number;
+  detectedSkillCount: number;
+  configuredOnlyCount: number;
+  detectedOnlyCount: number;
+  missingInProviderCount: number;
+  driftCount: number;
+  detectedLocalSkills: DetectedLocalSkill[];
+  skills: WorkspaceCatalogSkill[];
   error?: string;
 }
 
@@ -202,6 +256,26 @@ export interface WorkspaceSuggestion {
   manifestExists: boolean;
   skillCount: number;
   detected: DetectedSkillDir[];
+}
+
+export interface SkillsCatalog {
+  providerSkillCount: number;
+  workspaces: WorkspaceCatalogEntry[];
+  unassigned: Array<{
+    name: string;
+    type: 'skill' | 'prompt' | 'subagent';
+    description: string | null;
+    category: string | null;
+    tags: string[];
+    fileCount: number;
+  }>;
+  invalidWorkspaces: Array<{
+    filePath: string;
+    workspaceDir: string;
+    workspaceName: string;
+    error: string;
+    detectedSkillCount: number;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +344,14 @@ export interface SuggestionDir {
 
 export interface PickDirectoryResult {
   selectedDir: string | null;
+}
+
+export interface RegisterWorkspaceResult {
+  registered: string;
+  created: boolean;
+  detectedSkillCount: number;
+  adoptedSkillCount: number;
+  ignoredSkillNames: string[];
 }
 
 // ---------------------------------------------------------------------------

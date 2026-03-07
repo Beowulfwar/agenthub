@@ -107,6 +107,24 @@ export class WorkspaceNotFoundError extends AhubError {
 }
 
 /**
+ * Thrown when a workspace manifest references skills that do not exist
+ * in the configured provider.
+ */
+export class WorkspaceSkillReferenceError extends AhubError {
+  public readonly skillNames: string[];
+
+  constructor(skillNames: string[], options?: ErrorOptions) {
+    const uniqueNames = [...new Set(skillNames)].sort();
+    super(
+      `Workspace manifest references skills that are not available in the provider: ${uniqueNames.join(', ')}.`,
+      options,
+    );
+    this.name = 'WorkspaceSkillReferenceError';
+    this.skillNames = uniqueNames;
+  }
+}
+
+/**
  * Thrown when a workspace sync completes with one or more failures.
  */
 export class SyncError extends AhubError {

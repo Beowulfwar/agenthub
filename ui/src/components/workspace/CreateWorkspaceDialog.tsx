@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { X, FolderPlus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { X, FolderPlus, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRegisterWorkspace } from '../../hooks/useWorkspace';
+import { scanSkillDirs } from '../../api/client';
 import { HoverHint } from '../shared/HoverHint';
 import { DirectoryBrowser } from './DirectoryBrowser';
 
@@ -18,7 +19,40 @@ export function CreateWorkspaceDialog({
 }: CreateWorkspaceDialogProps) {
   const [directory, setDirectory] = useState(initialDirectory);
   const [name, setName] = useState(initialName);
+  const [detectedDirs, setDetectedDirs] = useState<{ absolutePath: string; label: string; tool: string; skillCount: number }[]>([]);
+  const [localSkillStrategy, setLocalSkillStrategy] = useState<'adopt' | 'ignore'>('adopt');
   const registerMutation = useRegisterWorkspace();
+
+  useEffect(() => {
+    const trimmedDirectory = directory.trim();
+    if (!trimmedDirectory) {
+      setDetectedDirs([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    void scanSkillDirs(trimmedDirectory)
+      .then((result) => {
+        if (!cancelled) {
+          setDetectedDirs(result.detected);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDetectedDirs([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [directory]);
+
+  const detectedSkillCount = useMemo(
+    () => detectedDirs.reduce((total, item) => total + item.skillCount, 0),
+    [detectedDirs],
+  );
 
   const handleSubmit = () => {
     const trimmedDirectory = directory.trim();
@@ -31,10 +65,24 @@ export function CreateWorkspaceDialog({
       {
         directory: trimmedDirectory,
         name: name.trim() || undefined,
+        ...(detectedDirs.length > 0 ? { localSkillStrategy } : {}),
       },
       {
-        onSuccess: () => {
-          toast.success('Workspace adicionado');
+        onSuccess: (result) => {
+          if (result.adoptedSkillCount > 0) {
+            toast.success(`Workspace adicionado com ${result.adoptedSkillCount} skill(s) adotada(s) no manifesto`);
+          } else if (result.detectedSkillCount > 0 && localSkillStrategy === 'ignore') {
+            toast.success(`Workspace adicionado. ${result.detectedSkillCount} skill(s) local(is) ficaram fora do manifesto por enquanto`);
+          } else {
+            toast.success('Workspace adicionado');
+          }
+
+          if (result.ignoredSkillNames.length > 0) {
+            toast.warning(
+              `Estas skills locais nao existem no provider e foram ignoradas: ${result.ignoredSkillNames.join(', ')}`,
+            );
+          }
+
           onClose();
         },
         onError: (err) => {
@@ -100,6 +148,57 @@ export function CreateWorkspaceDialog({
                 gerenciamento depois que este workspace for salvo.
               </p>
             </div>
+
+            {detectedDirs.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
+                  <Sparkles className="h-4 w-4" />
+                  Skills locais detectadas
+                  <HoverHint text="Ao criar um workspace novo, voce pode adotar as skills locais para preencher o manifesto automaticamente ou apenas registrar a pasta e decidir depois." />
+                </div>
+                <p className="mt-2 text-sm text-amber-800">
+                  Foram encontradas {detectedSkillCount} skill(s) local(is) em {detectedDirs.length}{' '}
+                  diretorio(s) reconhecido(s).
+                </p>
+                <div className="mt-3 space-y-2">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                    <input
+                      type="radio"
+                      name="local-skill-strategy"
+                      value="adopt"
+                      checked={localSkillStrategy === 'adopt'}
+                      onChange={() => setLocalSkillStrategy('adopt')}
+                      className="mt-0.5 h-4 w-4 border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Adotar no manifesto</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        O Agent Hub tenta vincular no manifesto as skills locais que tambem existem no provider.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                    <input
+                      type="radio"
+                      name="local-skill-strategy"
+                      value="ignore"
+                      checked={localSkillStrategy === 'ignore'}
+                      onChange={() => setLocalSkillStrategy('ignore')}
+                      className="mt-0.5 h-4 w-4 border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Ignorar por enquanto</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        Apenas registra o workspace. O manifesto fica vazio e o drift aparece em `/skills` e `/workspace`.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+                <p className="mt-3 text-xs text-amber-800">
+                  Se a pasta ja tiver `ahub.workspace.json`, o cadastro preserva o manifesto atual.
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="rounded-2xl border border-gray-200 bg-white p-4">
@@ -110,7 +209,10 @@ export function CreateWorkspaceDialog({
             <DirectoryBrowser
               initialDir={initialDirectory}
               selectedDir={directory}
-              onSelect={(dir) => setDirectory(dir)}
+              onSelect={(dir, detected) => {
+                setDirectory(dir);
+                setDetectedDirs(detected);
+              }}
             />
           </section>
         </div>

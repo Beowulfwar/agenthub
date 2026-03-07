@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -6,6 +6,7 @@ import {
   Trash2,
   FileText,
   Folder,
+  FolderKanban,
   Pencil,
   ClipboardCopy,
   Copy,
@@ -15,6 +16,7 @@ import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { useSkill, useDeleteSkill, usePatchSkill } from '../hooks/useSkills';
+import { useWorkspaceRegistry } from '../hooks/useWorkspace';
 import { DeployDialog } from '../components/deploy/DeployDialog';
 import { EditSkillForm } from '../components/skills/EditSkillForm';
 import { CloneDialog } from '../components/skills/CloneDialog';
@@ -28,6 +30,23 @@ export function SkillDetailPage() {
   const { data: pkg, isLoading, error } = useSkill(name ?? '');
   const deleteMutation = useDeleteSkill();
   const patchMutation = usePatchSkill();
+  const workspaceRegistry = useWorkspaceRegistry();
+
+  const belongsToWorkspaces = useMemo(() => {
+    if (!name || !workspaceRegistry.data) return [];
+    return workspaceRegistry.data
+      .filter((entry) => {
+        if (!entry.manifest) return false;
+        const names = new Set<string>();
+        entry.manifest.groups?.forEach((g) => g.skills.forEach((s) => names.add(s)));
+        entry.manifest.skills?.forEach((s) => names.add(s.name));
+        return names.has(name);
+      })
+      .map((entry) => ({
+        name: entry.manifest?.name?.trim() || entry.workspaceDir.split('/').pop() || entry.workspaceDir,
+        isActive: entry.isActive,
+      }));
+  }, [name, workspaceRegistry.data]);
 
   const [showDeploy, setShowDeploy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -118,6 +137,22 @@ export function SkillDetailPage() {
             <p className="mt-1 text-sm text-gray-500">
               {skill.metadata.description as string}
             </p>
+          )}
+          {belongsToWorkspaces.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {belongsToWorkspaces.map((ws) => (
+                <span
+                  key={ws.name}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
+                    ws.isActive ? 'bg-brand-50 text-brand-700' : 'bg-blue-50 text-blue-700',
+                  )}
+                >
+                  <FolderKanban className="h-3 w-3" />
+                  {ws.name}
+                </span>
+              ))}
+            </div>
           )}
         </div>
         <div className="flex flex-wrap gap-2">

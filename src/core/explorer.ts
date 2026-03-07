@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { isWSL, normalizeExternalPath, normalizePath, toWindowsPath } from './wsl.js';
 import { ALL_MARKER_FILES } from './types.js';
 import { findWorkspaceManifestInDirectory } from './workspace.js';
+import type { DeployTarget, DetectedLocalSkill } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -78,6 +79,12 @@ export interface DetectedSkillDir {
   skillCount: number;
 }
 
+const TOOL_TO_TARGET: Partial<Record<string, DeployTarget>> = {
+  'claude-code': 'claude-code',
+  codex: 'codex',
+  cursor: 'cursor',
+};
+
 /** A suggested workspace root inferred from detected local skills. */
 export interface WorkspaceSuggestion {
   /** Absolute workspace directory to register. */
@@ -110,7 +117,8 @@ export async function scanForSkillDirs(baseDir: string): Promise<DetectedSkillDi
 
   for (const pattern of WELL_KNOWN_SKILL_DIRS) {
     const fullPath = path.join(normalized, pattern.relativePath);
-    const count = await countSkillFiles(fullPath);
+    const detectedSkills = await listSkillEntriesInDir(fullPath, pattern.label, pattern.tool);
+    const count = detectedSkills.length;
 
     if (count > 0) {
       results.push({
@@ -126,17 +134,41 @@ export async function scanForSkillDirs(baseDir: string): Promise<DetectedSkillDi
 }
 
 /**
+ * Detect concrete skill names inside all well-known local directories of a workspace.
+ */
+export async function detectLocalSkills(baseDir: string): Promise<DetectedLocalSkill[]> {
+  const normalized = normalizePath(baseDir);
+  const results: DetectedLocalSkill[] = [];
+
+  for (const pattern of WELL_KNOWN_SKILL_DIRS) {
+    const fullPath = path.join(normalized, pattern.relativePath);
+    const entries = await listSkillEntriesInDir(fullPath, pattern.label, pattern.tool);
+    results.push(...entries);
+  }
+
+  return results;
+}
+
+/**
  * Count files that look like skills (SKILL.md, PROMPT.md, AGENT.md, or .md files)
  * inside a directory. Counts both direct .md files and subdirectories with marker files.
  */
 async function countSkillFiles(dir: string): Promise<number> {
+  return (await listSkillEntriesInDir(dir, 'local', 'generic')).length;
+}
+
+async function listSkillEntriesInDir(
+  dir: string,
+  label: string,
+  tool: string,
+): Promise<DetectedLocalSkill[]> {
   try {
     await access(dir);
   } catch {
-    return 0;
+    return [];
   }
 
-  let count = 0;
+  const results: DetectedLocalSkill[] = [];
   try {
     const entries = await readdir(dir, { withFileTypes: true });
 
@@ -146,7 +178,14 @@ async function countSkillFiles(dir: string): Promise<number> {
         for (const marker of ALL_MARKER_FILES) {
           try {
             await access(path.join(dir, entry.name, marker));
-            count++;
+            results.push({
+              name: entry.name,
+              label,
+              tool,
+              directoryPath: dir,
+              absolutePath: path.join(dir, entry.name),
+              target: TOOL_TO_TARGET[tool],
+            });
             break;
           } catch {
             // no marker in this subdir
@@ -154,14 +193,21 @@ async function countSkillFiles(dir: string): Promise<number> {
         }
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         // Direct .md files (e.g. claude commands)
-        count++;
+        results.push({
+          name: entry.name.replace(/\.md$/i, ''),
+          label,
+          tool,
+          directoryPath: dir,
+          absolutePath: path.join(dir, entry.name),
+          target: TOOL_TO_TARGET[tool],
+        });
       }
     }
   } catch {
     // Cannot read directory
   }
 
-  return count;
+  return results;
 }
 
 // ---------------------------------------------------------------------------

@@ -18,9 +18,17 @@ import {
   unregisterWorkspace,
   setActiveWorkspace,
 } from '../../core/config.js';
-import { suggestWorkspaceDirs } from '../../core/explorer.js';
+import { detectLocalSkills, suggestWorkspaceDirs } from '../../core/explorer.js';
 import type { WorkspaceManifest, WorkspaceRegistryEntry } from '../../core/types.js';
+import { ProviderNotConfiguredError } from '../../core/errors.js';
+import {
+  buildAdoptedManifestSkills,
+  buildWorkspaceCatalogEntry,
+  loadProviderSkillIndex,
+  validateWorkspaceManifestSkills,
+} from '../../core/workspace-catalog.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
+import { createProvider } from '../../storage/factory.js';
 
 export function workspaceRoutes(): Hono {
   const app = new Hono();
@@ -33,26 +41,52 @@ export function workspaceRoutes(): Hono {
   app.get('/registry', async (c) => {
     const registry = await getWorkspaceRegistry();
     const entries: WorkspaceRegistryEntry[] = [];
+    const providerIndex = await loadOptionalProviderIndex();
 
     for (const filePath of registry.paths) {
       try {
         const manifest = await loadWorkspaceManifest(filePath);
-        const resolved = resolveManifestSkills(manifest);
+        const catalog = await buildWorkspaceCatalogEntry({
+          filePath,
+          isActive: filePath === registry.active,
+          manifest,
+          providerIndex,
+        });
         entries.push({
           filePath,
           workspaceDir: path.dirname(filePath),
           manifest,
           isActive: filePath === registry.active,
-          skillCount: resolved.length,
+          skillCount: catalog.configuredSkillCount,
+          configuredSkillCount: catalog.configuredSkillCount,
+          detectedSkillCount: catalog.detectedSkillCount,
+          configuredOnlyCount: catalog.configuredOnlyCount,
+          detectedOnlyCount: catalog.detectedOnlyCount,
+          missingInProviderCount: catalog.missingInProviderCount,
+          driftCount: catalog.driftCount,
         });
       } catch (err) {
+        const loadError = (err as Error).message;
+        const catalog = await buildWorkspaceCatalogEntry({
+          filePath,
+          isActive: filePath === registry.active,
+          manifest: null,
+          loadError,
+          providerIndex,
+        });
         entries.push({
           filePath,
           workspaceDir: path.dirname(filePath),
           manifest: null,
           isActive: filePath === registry.active,
           skillCount: 0,
-          error: (err as Error).message,
+          configuredSkillCount: 0,
+          detectedSkillCount: catalog.detectedSkillCount,
+          configuredOnlyCount: 0,
+          detectedOnlyCount: catalog.detectedOnlyCount,
+          missingInProviderCount: 0,
+          driftCount: catalog.driftCount,
+          error: loadError,
         });
       }
     }
@@ -67,11 +101,15 @@ export function workspaceRoutes(): Hono {
       directory?: string;
       create?: boolean;
       name?: string;
+      localSkillStrategy?: 'adopt' | 'ignore';
     }>();
 
     const fallbackName = body.name?.trim();
     let manifestPath: string;
     let created = false;
+    let detectedSkillCount = 0;
+    let adoptedSkillCount = 0;
+    let ignoredSkillNames: string[] = [];
 
     if (body.directory) {
       const normalizedDir = await normalizeExternalPath(body.directory);
@@ -87,11 +125,29 @@ export function workspaceRoutes(): Hono {
         }
 
         manifestPath = path.join(absDir, 'ahub.workspace.json');
+        let adoptedSkills;
+
+        if (body.localSkillStrategy === 'adopt') {
+          const config = await loadConfig();
+          if (!config) {
+            throw new ProviderNotConfiguredError('storage');
+          }
+
+          const provider = createProvider(config);
+          const adoption = await buildAdoptedManifestSkills(absDir, provider);
+          adoptedSkills = adoption.skills;
+          detectedSkillCount = adoption.detectedSkillCount;
+          adoptedSkillCount = adoption.adoptedSkillCount;
+          ignoredSkillNames = adoption.ignoredSkillNames;
+        } else if (body.localSkillStrategy === 'ignore') {
+          detectedSkillCount = new Set((await detectLocalSkills(absDir)).map((skill) => skill.name)).size;
+        }
+
         const manifest: WorkspaceManifest = {
           version: 1,
           name: fallbackName || path.basename(absDir),
           defaultTargets: ['claude-code'],
-          skills: [],
+          skills: adoptedSkills ?? [],
         };
         await saveWorkspaceManifest(manifestPath, manifest);
         created = true;
@@ -117,7 +173,15 @@ export function workspaceRoutes(): Hono {
     }
 
     await registerWorkspace(manifestPath);
-    return c.json({ data: { registered: manifestPath, created } });
+    return c.json({
+      data: {
+        registered: manifestPath,
+        created,
+        detectedSkillCount,
+        adoptedSkillCount,
+        ignoredSkillNames,
+      },
+    });
   });
 
   // DELETE /api/workspace/registry — unregister a workspace
@@ -173,15 +237,30 @@ export function workspaceRoutes(): Hono {
     const workspaceDir = path.dirname(filePath);
     const config = await loadConfig();
     const targetDirectories = await inspectDeployTargets(config, workspaceDir);
+    const providerIndex = await loadOptionalProviderIndex();
 
     try {
       const manifest = await loadWorkspaceManifest(filePath);
       const resolved = resolveManifestSkills(manifest);
+      const catalog = await buildWorkspaceCatalogEntry({
+        filePath,
+        isActive: false,
+        manifest,
+        providerIndex,
+      });
       return c.json({
-        data: { manifest, filePath, workspaceDir, resolved, targetDirectories },
+        data: { manifest, filePath, workspaceDir, resolved, targetDirectories, catalog },
       });
     } catch (err) {
       // File might not exist anymore — return gracefully
+      const loadError = (err as Error).message;
+      const catalog = await buildWorkspaceCatalogEntry({
+        filePath,
+        isActive: false,
+        manifest: null,
+        loadError,
+        providerIndex,
+      });
       return c.json({
         data: {
           manifest: null,
@@ -189,7 +268,8 @@ export function workspaceRoutes(): Hono {
           workspaceDir,
           resolved: [],
           targetDirectories,
-          error: (err as Error).message,
+          catalog,
+          error: loadError,
         },
       });
     }
@@ -203,10 +283,36 @@ export function workspaceRoutes(): Hono {
     }>();
 
     const normalizedFile = await normalizeExternalPath(body.filePath);
+    const resolved = resolveManifestSkills(body.manifest);
+
+    if (resolved.length > 0) {
+      const config = await loadConfig();
+      if (!config) {
+        throw new ProviderNotConfiguredError('storage');
+      }
+
+      const provider = createProvider(config);
+      await validateWorkspaceManifestSkills(body.manifest, provider);
+    }
+
     await saveWorkspaceManifest(normalizedFile, body.manifest);
 
     return c.json({ data: { saved: normalizedFile } });
   });
 
   return app;
+}
+
+async function loadOptionalProviderIndex() {
+  const config = await loadConfig();
+  if (!config) {
+    return undefined;
+  }
+
+  try {
+    const provider = createProvider(config);
+    return await loadProviderSkillIndex(provider);
+  } catch {
+    return undefined;
+  }
 }

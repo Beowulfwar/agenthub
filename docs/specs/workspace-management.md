@@ -29,13 +29,17 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 3. A lista principal de `/workspace` exibe todos os workspaces cadastrados sem filtros locais de busca, status ou quantidade de skills.
 4. O card selecionado na lista vira o contexto de edicao e sync dentro da tela; o usuario nao precisa acionar um botao extra de “tornar ativo”.
 5. O projeto pode existir mesmo com `skills: []` ou sem skills locais detectadas.
-6. `ahub.workspace.json` descreve o que sera sincronizado para o projeto; ele nao armazena os pacotes remotos em si.
+6. `ahub.workspace.json` descreve o que sera sincronizado para o projeto; ele nao armazena os pacotes remotos em si e e a fonte oficial do vinculo skill-workspace.
 7. A UI deve explicitar o diretorio do projeto e esconder o conceito de manifest como detalhe de implementacao, sempre que possivel.
 8. Para cada target suportado, a UI deve mostrar o diretorio reconhecido que sera usado pelo sync.
 9. Quando nao houver workspaces cadastrados, a UI deve sugerir pastas a partir de skills locais encontradas em estruturas conhecidas como `.skills`, `.codex`, `.claude` e `.cursor`.
 10. O fluxo de selecao de pasta deve ser guiado por navegacao visual e sugestoes; a UI nao deve depender de digitacao manual de caminhos.
 11. Campos que exigem contexto extra devem usar ajuda contextual discreta (tooltip/hover hint), em vez de espalhar textos longos pela tela.
-12. Precedencia de diretorio de deploy por target:
+12. A lista e o seletor de workspace devem separar `skills configuradas` de `skills detectadas localmente`; contagem local nao substitui contagem de manifesto.
+13. Ao registrar um workspace novo com skills locais detectadas, a UI precisa oferecer `adotar no manifesto` ou `ignorar por enquanto`.
+14. Skills detectadas apenas no disco sao tratadas como drift observavel; elas nao entram no manifesto automaticamente sem escolha explicita do usuario.
+15. Salvamento de manifesto e sync devem falhar com erro claro quando o manifesto referenciar skills que nao existem no provider.
+16. Precedencia de diretorio de deploy por target:
    - `config.deployTargets[target]`
    - raiz local do workspace ativo (ex.: `project/.codex`)
    - padrao nativo da ferramenta quando nao houver workspace selecionado
@@ -66,6 +70,18 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 - **When**: Clica em `Novo workspace` e registra essa pasta
 - **Then**: O sistema cria `ahub.workspace.json` dentro dela quando necessario e adiciona a pasta na lista de workspaces
 
+### Cenario: Adotar skills locais ao registrar workspace
+
+- **Given**: O usuario escolhe uma pasta com `.skills` ou `.codex/skills`
+- **When**: Registra um workspace novo com a opcao `Adotar no manifesto`
+- **Then**: O manifesto inicial tenta vincular apenas as skills locais que tambem existem no provider, preservando as demais como ignoradas
+
+### Cenario: Ignorar skills locais por enquanto
+
+- **Given**: O usuario escolhe uma pasta com skills locais detectadas
+- **When**: Registra o workspace com a opcao `Ignorar por enquanto`
+- **Then**: O workspace e cadastrado, o manifesto pode permanecer vazio e a divergencia aparece como drift na UI
+
 ### Cenario: Projeto novo sem skills locais
 
 - **Given**: O usuario registra um projeto recem-clonado sem `.skills`, `.codex`, `.claude` ou `.cursor`
@@ -89,6 +105,18 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 - **Given**: Existe um projeto local com skills, mas ele nao foi cadastrado
 - **When**: O usuario abre `/workspace`
 - **Then**: As skills desse projeto nao aparecem nos detalhes ate que a pasta seja adicionada na lista de workspaces
+
+### Cenario: Contagens separadas de configuracao e deteccao
+
+- **Given**: Um workspace possui duas skills no manifesto e tres skills detectadas localmente
+- **When**: O usuario abre `/workspace`
+- **Then**: A tela mostra `2 skills configuradas`, `3 detectadas localmente` e o total de drift calculado a partir dessas diferencas
+
+### Cenario: Manifesto com skill ausente no provider
+
+- **Given**: O manifesto de um workspace referencia uma skill removida do provider
+- **When**: O usuario tenta salvar o workspace ou executar sync
+- **Then**: A API rejeita a operacao com erro explicito em vez de sincronizar parcialmente
 
 ### Cenario: Sync por projeto
 
@@ -115,6 +143,8 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 | Card clicavel abre a edicao | Remove redundancia visual e deixa claro que a lista inteira e navegavel |
 | Diretorios por agente visiveis na UI | Garante que o usuario entenda onde Codex/Claude/Cursor vao ler os arquivos |
 | Paths locais por workspace como padrao | Evita misturar skills de projetos diferentes no mesmo diretorio global |
+| Adocao de skills locais exige escolha explicita | Evita que deteccao local altere o manifesto silenciosamente |
+| Contadores separados de manifesto vs disco | Impede que a UI trate heuristica de scan como fonte de verdade |
 
 ## Changelog
 
@@ -125,3 +155,4 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 | 2026-03-06 | Atualizada para modal unico de selecao, navegacao sem digitacao manual e ajuda contextual por hover |
 | 2026-03-06 | Atualizada para tratar o card selecionado como contexto de edicao/sync e remover redundancias de `Editar` e `Tornar ativo` da UI |
 | 2026-03-06 | Atualizada para listar todos os workspaces sem filtros locais de busca, status ou skills |
+| 2026-03-06 | Atualizada para separar skills configuradas de detectadas localmente, oferecer adocao/ignoracao no cadastro e explicitar drift/validacao contra provider |

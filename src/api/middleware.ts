@@ -10,6 +10,7 @@ import {
   ProviderNotConfiguredError,
   AuthenticationError,
   WorkspaceNotFoundError,
+  WorkspaceSkillReferenceError,
 } from '../core/errors.js';
 
 export interface ApiError {
@@ -23,6 +24,12 @@ export const errorHandler: ErrorHandler = (err, c) => {
   }
   if (err instanceof WorkspaceNotFoundError) {
     return c.json({ error: { code: 'WORKSPACE_NOT_FOUND', message: err.message } }, 404);
+  }
+  if (err instanceof WorkspaceSkillReferenceError) {
+    return c.json(
+      { error: { code: 'WORKSPACE_SKILLS_NOT_FOUND', message: err.message } },
+      400,
+    );
   }
   if (err instanceof SkillValidationError) {
     return c.json({ error: { code: 'VALIDATION_ERROR', message: err.message } }, 400);

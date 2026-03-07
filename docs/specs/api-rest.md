@@ -1,152 +1,109 @@
 # api-rest
 
-> Spec comportamental — contrato vivo para agentes e desenvolvedores.
+> Spec comportamental — contrato vivo da API HTTP do agent-hub.
 
 ## Proposito
 
-API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server`. Expoe endpoints para gerenciar skills, configuracao, cache, workspace, exploracao de diretorios, deploy e sync. Inclui error handler centralizado que mapeia a hierarquia de erros do dominio para codigos HTTP deterministicos, e suporte a SSE (Server-Sent Events) para progresso de sync em tempo real.
+Documentar o contrato observavel da API REST servida por Hono. A API expoe endpoints para provider, cache, workspace, exploracao de diretorios, deploy e sync. Para skills e workspaces, o contrato agora diferencia explicitamente provider, manifesto e deteccao local.
 
 ## Localizacao
 
-- **Codigo**: `src/api/server.ts`, `src/api/router.ts`, `src/api/middleware.ts`, `src/api/routes/health.ts`, `src/api/routes/skills.ts`, `src/api/routes/config.ts`, `src/api/routes/cache.ts`, `src/api/routes/workspace.ts`, `src/api/routes/explorer.ts`, `src/api/routes/deploy.ts`, `src/api/routes/sync.ts`
-- **Testes unitarios**: `tests/api/routes.test.ts`
-- **Testes de caracterizacao**: `tests/specs/api-rest.spec.ts`
+- **Codigo**: `src/api/server.ts`, `src/api/router.ts`, `src/api/middleware.ts`, `src/api/routes/*.ts`
+- **Core**: `src/core/workspace-catalog.ts`, `src/core/workspace.ts`, `src/core/explorer.ts`
+- **Testes de caracterizacao**: `tests/specs/*.spec.ts`
 
 ## Invariantes
 
-1. TODAS as respostas de sucesso sao envelopadas em `{ data: T }`
-2. TODAS as respostas de erro sao envelopadas em `{ error: { code: string, message: string } }`
-3. O mapeamento de erros de dominio para HTTP e deterministico e exaustivo: `SkillNotFoundError` -> 404, `WorkspaceNotFoundError` -> 404, `SkillValidationError` -> 400, `ProviderNotConfiguredError` -> 503, `AuthenticationError` -> 401, `AhubError` -> 500, desconhecido -> 500
-4. Eventos SSE seguem o protocolo de 3 tipos: `progress`, `complete`, `error`
-5. Arquivos estaticos sao servidos com MIME types corretos (mapa explicito de extensoes)
-6. SPA fallback: rotas que nao sao `/api/*` e nao correspondem a arquivo estatico retornam `index.html`
-7. CORS habilitado apenas em modo dev (origens `localhost:5173` e `127.0.0.1:5173`)
-8. Porta padrao do servidor: 3737
+1. Toda resposta de sucesso usa envelope `{ data: T }`.
+2. Toda resposta de erro usa envelope `{ error: { code, message } }`.
+3. O error handler mapeia erros de dominio de forma deterministica, incluindo `WorkspaceSkillReferenceError -> 400`.
+4. Eventos SSE seguem o protocolo `progress`, `complete` e `error`.
+5. `GET /api/skills/catalog` e a fonte unica de verdade para a tela `/skills`, unificando provider, manifests e deteccao local.
+6. `GET /api/workspace/registry` separa contadores de `skills configuradas` e `skills detectadas localmente`; `skillCount` permanece apenas como alias retrocompativel da contagem configurada.
+7. `PUT /api/workspace`, `POST /api/sync` e `GET /api/sync/stream` validam referencias do manifesto contra o provider antes de persistir ou sincronizar.
+8. CORS so fica habilitado em modo dev.
+9. Rotas nao-API que nao correspondem a arquivo estatico retornam `index.html` para o frontend.
 
 ## Comportamentos (Given/When/Then)
 
-### GET /api/health retorna status do sistema configurado
+### Cenario: Listar skills simples
 
-- **Given**: Provider configurado e conectado; cache com N skills
-- **When**: `GET /api/health`
-- **Then**: Retorna 200 com `{ data: { configured: true, provider: 'git', providerHealth: { ok: true, message: '...' }, cacheCount: N } }`
-
-### GET /api/health retorna status quando nao configurado
-
-- **Given**: Nenhuma configuracao existe (`~/.ahub/config.json` ausente)
-- **When**: `GET /api/health`
-- **Then**: Retorna 200 com `{ data: { configured: false, provider: null, providerHealth: null, cacheCount: 0 } }`
-
-### GET /api/skills lista e filtra skills
-
-- **Given**: Provider contem skills `["fiscal-nfe", "fiscal-nfce", "performance-sql"]`
+- **Given**: O provider contem `fiscal-nfe`, `fiscal-nfce` e `performance-sql`
 - **When**: `GET /api/skills?q=fiscal`
-- **Then**: Retorna 200 com `{ data: ["fiscal-nfe", "fiscal-nfce"] }`
+- **Then**: A API retorna apenas `fiscal-nfe` e `fiscal-nfce`
 
-### GET /api/skills/:name retorna 404 para skill inexistente
+### Cenario: Catalogo unificado de skills
 
-- **Given**: Skill `"nao-existe"` nao existe no backend
-- **When**: `GET /api/skills/nao-existe`
-- **Then**: Error handler intercepta `SkillNotFoundError`, retorna 404 com `{ error: { code: 'SKILL_NOT_FOUND', message: 'Skill "nao-existe" was not found.' } }`
+- **Given**: Existem skills no provider, workspaces registrados e deteccao local em alguns projetos
+- **When**: `GET /api/skills/catalog`
+- **Then**: A resposta inclui `workspaces[]`, `unassigned[]`, `invalidWorkspaces[]` e contadores separados de configuracao, deteccao e drift
 
-### POST /api/deploy faz deploy multi-skill multi-target
+### Cenario: Registrar workspace com adocao de skills locais
 
-- **Given**: Body `{ skills: ["fiscal-nfe", "performance-sql"], targets: ["claude-code", "cursor"] }` e ambas as skills existem no provider
-- **When**: `POST /api/deploy`
-- **Then**: Faz deploy de cada skill em cada target, retorna 200 com `{ data: { deployed: [...], failed: [...] } }` onde cada entry em deployed contem `{ skill, target, path }`
-
-### POST /api/deploy rejeita lista vazia de skills
-
-- **Given**: Body `{ skills: [], targets: ["claude-code"] }`
-- **When**: `POST /api/deploy`
-- **Then**: Retorna 400 com `{ error: { code: 'VALIDATION_ERROR', message: 'At least one skill is required.' } }`
-
-### GET /api/sync/stream emite eventos SSE
-
-- **Given**: Workspace manifest valida com skills a sincronizar
-- **When**: `GET /api/sync/stream`
-- **Then**: Abre conexao SSE, emite eventos `progress` com `{ phase, skill, target, current, total }`, ao final emite evento `complete` com `SyncResult`, fecha conexao
-
-### POST /api/workspace/registry aceita uma pasta e resolve o manifesto
-
-- **Given**: Body `{ directory: "/projeto/app" }` e nenhum `ahub.workspace.json` existe em `/projeto/app`
+- **Given**: O body e `{ directory: "/projeto/app", localSkillStrategy: "adopt" }`, a pasta contem `.skills` e algumas dessas skills existem no provider
 - **When**: `POST /api/workspace/registry`
-- **Then**: Cria `/projeto/app/ahub.workspace.json`, registra esse manifesto e retorna `{ data: { registered, created: true } }`
+- **Then**: A API cria `ahub.workspace.json`, registra o workspace e retorna `detectedSkillCount`, `adoptedSkillCount` e `ignoredSkillNames`
 
-### GET /api/workspace expoe apenas o workspace ativo registrado
+### Cenario: Registrar workspace ignorando skills locais
 
-- **Given**: Nao existe workspace ativo registrado
-- **When**: `GET /api/workspace`
-- **Then**: Retorna `{ data: { manifest: null, filePath: null, workspaceDir: null, resolved: [], targetDirectories: [] } }`, sem inferir automaticamente um manifesto a partir do diretorio atual
+- **Given**: O body e `{ directory: "/projeto/app", localSkillStrategy: "ignore" }`
+- **When**: `POST /api/workspace/registry`
+- **Then**: A API registra o workspace sem preencher o manifesto com as skills detectadas, mas informa a quantidade local detectada
 
-### GET /api/workspace expoe o projeto ativo e os diretorios reconhecidos
+### Cenario: Consultar workspace ativo com catalogo local
 
 - **Given**: Existe um workspace ativo em `/projeto/app`
 - **When**: `GET /api/workspace`
-- **Then**: Retorna `workspaceDir`, `filePath`, `resolved` e `targetDirectories[]`, onde cada target informa a raiz e as pastas `skill`, `prompt` e `subagent` que o sync usara
+- **Then**: A resposta inclui `manifest`, `resolved`, `targetDirectories` e `catalog`, onde `catalog` explicita configuracao, deteccao local e drift
 
-### GET /api/workspace/suggestions sugere workspaces a partir de skills locais
+### Cenario: Listar registry com contadores separados
 
-- **Given**: Existe um projeto com `./.skills` ou `./.codex/skills`
-- **When**: `GET /api/workspace/suggestions`
-- **Then**: A resposta sugere a raiz do projeto como `workspaceDir`, informa `skillCount`, `detected[]` e se `ahub.workspace.json` ja existe naquela pasta
+- **Given**: Um workspace tem duas skills no manifesto e tres skills detectadas localmente
+- **When**: `GET /api/workspace/registry`
+- **Then**: A entrada desse workspace retorna `configuredSkillCount=2`, `detectedSkillCount=3`, `driftCount` e `missingInProviderCount`
 
-### POST /api/sync aceita um workspace explicito
+### Cenario: Salvar manifesto com skill ausente do provider
 
-- **Given**: Body `{ filePath: "/projeto/app/ahub.workspace.json" }`
-- **When**: `POST /api/sync`
-- **Then**: O sync usa esse workspace explicitamente, sem depender do workspace ativo global
+- **Given**: O body de `PUT /api/workspace` referencia uma skill que nao existe no provider
+- **When**: A API valida o manifesto
+- **Then**: A resposta e `400` com codigo `WORKSPACE_SKILLS_NOT_FOUND`
 
-### POST /api/explorer/pick-directory retorna a pasta selecionada no dialogo nativo
+### Cenario: Sync com manifesto divergente do provider
 
-- **Given**: Cliente aciona a rota a partir da UI local
-- **When**: `POST /api/explorer/pick-directory`
-- **Then**: O backend abre o seletor nativo de pastas do sistema operacional e retorna `{ data: { selectedDir } }`, onde `selectedDir` pode ser `null` se o usuario cancelar
-
-### Error handler mapeia ProviderNotConfiguredError para 503
-
-- **Given**: Rota lanca `ProviderNotConfiguredError`
-- **When**: Error handler intercepta a excecao
-- **Then**: Retorna 503 com `{ error: { code: 'NOT_CONFIGURED', message: '...' } }` — nunca retorna 500 para esse tipo de erro
+- **Given**: O workspace escolhido referencia uma skill inexistente no provider
+- **When**: `POST /api/sync` ou `GET /api/sync/stream`
+- **Then**: A validacao falha antes de qualquer deploy
 
 ## Contratos de Interface
-
-### Funcoes Publicas
-
-| Funcao | Input | Output | Throws |
-|--------|-------|--------|--------|
-| `startApiServer(options?)` | `ServerOptions` | `Promise<{ server, port, app }>` | — |
-| `createApiApp()` | — | `Hono` | — |
-| `errorHandler` | `ErrorHandler` (Hono) | resposta HTTP | — |
 
 ### Endpoints
 
 | Metodo | Rota | Descricao | Sucesso | Erro |
 |--------|------|-----------|---------|------|
-| GET | `/api/health` | Status do provider, cache, config | `{ data: HealthStatus }` | — |
-| GET | `/api/skills?q=&detailed=` | Listar/buscar skills | `{ data: string[] \| SkillSummary[] }` | — |
-| GET | `/api/skills/:name` | Obter SkillPackage completo | `{ data: SkillPackage }` | 404 |
-| PUT | `/api/skills/:name` | Criar/atualizar skill | `{ data: { name } }` | 400, 404 |
+| GET | `/api/health` | Status do provider, cache e configuracao | `{ data: HealthStatus }` | — |
+| GET | `/api/skills?q=&detailed=` | Listar ou detalhar skills do provider | `{ data: string[] \| SkillSummary[] }` | — |
+| GET | `/api/skills/catalog?q=` | Catalogo unificado provider + workspaces + deteccao local | `{ data: SkillsCatalog }` | — |
+| GET | `/api/skills/:name` | Obter `SkillPackage` completo | `{ data: SkillPackage }` | 404 |
+| PUT | `/api/skills/:name` | Criar ou atualizar skill | `{ data: { name, type } }` | 400, 404 |
+| PATCH | `/api/skills/:name` | Atualizacao parcial de skill | `{ data: { name, type } }` | 400, 404 |
 | DELETE | `/api/skills/:name` | Remover skill | `{ data: { deleted } }` | 404 |
 | GET | `/api/config` | Configuracao completa | `{ data: AhubConfig }` | — |
-| GET | `/api/config/:key` | Valor por dot-path | `{ data: { key, value } }` | — |
-| PUT | `/api/config/:key` | Definir valor por dot-path | `{ data: { key, value } }` | — |
 | GET | `/api/cache` | Listar skills em cache | `{ data: string[] }` | — |
-| DELETE | `/api/cache` | Limpar todo o cache | `{ data: { cleared: true } }` | — |
-| GET | `/api/workspace` | Workspace ativo + skills resolvidas + diretorios reconhecidos | `{ data: { manifest, filePath, workspaceDir, resolved, targetDirectories } }` | — |
-| PUT | `/api/workspace` | Salvar manifest | `{ data: { saved } }` | — |
-| GET | `/api/workspace/registry` | Listar workspaces registrados | `{ data: WorkspaceRegistryEntry[] }` | — |
-| POST | `/api/workspace/registry` | Registrar ou criar workspace a partir de manifesto/pasta | `{ data: { registered, created } }` | 400 |
+| DELETE | `/api/cache` | Limpar cache | `{ data: { cleared: true } }` | — |
+| GET | `/api/workspace` | Workspace ativo ou explicito, com diretorios e catalogo | `{ data: { manifest, filePath, workspaceDir, resolved, targetDirectories, catalog } }` | — |
+| PUT | `/api/workspace` | Salvar manifesto com validacao no provider | `{ data: { saved } }` | 400, 503 |
+| GET | `/api/workspace/registry` | Listar workspaces registrados com contadores separados | `{ data: WorkspaceRegistryEntry[] }` | — |
+| POST | `/api/workspace/registry` | Registrar ou criar workspace, com opcao de adotar skills locais | `{ data: { registered, created, detectedSkillCount, adoptedSkillCount, ignoredSkillNames } }` | 400, 503 |
 | DELETE | `/api/workspace/registry` | Remover workspace registrado | `{ data: { unregistered } }` | — |
 | PUT | `/api/workspace/active` | Definir workspace ativo | `{ data: { active } }` | 400 |
-| GET | `/api/workspace/suggestions` | Sugerir workspaces a partir de skills locais detectadas | `{ data: WorkspaceSuggestion[] }` | — |
-| GET | `/api/explorer/browse?dir=&hidden=` | Listar diretorios navegaveis | `{ data: { currentDir, entries } }` | 400 |
-| GET | `/api/explorer/scan?dir=` | Detectar diretorios de skills conhecidos | `{ data: { baseDir, detected } }` | 400 |
-| GET | `/api/explorer/suggestions` | Sugerir diretorios iniciais para exploracao | `{ data: SuggestionDir[] }` | — |
+| GET | `/api/workspace/suggestions` | Sugerir roots de workspace a partir de skills locais detectadas | `{ data: WorkspaceSuggestion[] }` | — |
+| GET | `/api/explorer/browse?dir=&hidden=` | Navegar diretorios | `{ data: { currentDir, entries } }` | 400 |
+| GET | `/api/explorer/scan?dir=` | Detectar diretorios locais de skills | `{ data: { baseDir, detected } }` | 400 |
+| GET | `/api/explorer/suggestions` | Sugestoes iniciais de diretorio | `{ data: SuggestionDir[] }` | — |
 | POST | `/api/explorer/pick-directory` | Abrir seletor nativo de pasta | `{ data: { selectedDir } }` | 500 |
 | POST | `/api/deploy` | Deploy multi-skill multi-target | `{ data: { deployed[], failed[] } }` | 400 |
-| POST | `/api/sync` | Sync completo (nao-streaming), opcionalmente para `filePath` explicito | `{ data: SyncResult }` | 404 |
-| GET | `/api/sync/stream` | SSE de progresso do sync, opcionalmente para `path` explicito | eventos SSE | evento error |
+| POST | `/api/sync` | Sync nao-streaming, opcionalmente para `filePath` explicito | `{ data: SyncResult }` | 400, 404 |
+| GET | `/api/sync/stream` | SSE de progresso do sync | eventos SSE | evento `error` |
 
 ### Mapeamento Error -> HTTP
 
@@ -155,54 +112,39 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | `SkillNotFoundError` | 404 | `SKILL_NOT_FOUND` |
 | `WorkspaceNotFoundError` | 404 | `WORKSPACE_NOT_FOUND` |
 | `SkillValidationError` | 400 | `VALIDATION_ERROR` |
+| `WorkspaceSkillReferenceError` | 400 | `WORKSPACE_SKILLS_NOT_FOUND` |
 | `ProviderNotConfiguredError` | 503 | `NOT_CONFIGURED` |
 | `AuthenticationError` | 401 | `AUTH_ERROR` |
-| `AhubError` (base) | 500 | `AHUB_ERROR` |
+| `AhubError` | 500 | `AHUB_ERROR` |
 | Desconhecido | 500 | `INTERNAL_ERROR` |
 
-### Protocolo SSE (sync/stream)
+### Protocolo SSE
 
 | Evento | Payload | Descricao |
 |--------|---------|-----------|
-| `progress` | `SyncProgressEvent` | Progresso de cada operacao (phase, skill, target, current, total) |
-| `complete` | `SyncResult` | Resultado final do sync (deployed, failed, skipped) |
-| `error` | `{ code, message }` | Erro durante o sync |
-
-### Tipos Exportados
-
-- `ServerOptions` — `{ port?: number, staticDir?: string, devMode?: boolean }`
-- `ApiError` — `{ code: string, message: string }`
-
-## Dependencias
-
-- **Usa**: `hono` (framework HTTP), `@hono/node-server` (serve), `hono/cors` (CORS dev), `hono/streaming` (SSE), `core/config.ts`, `core/cache.ts`, `core/workspace.ts`, `core/explorer.ts`, `core/wsl.ts`, `core/sync.ts`, `core/skill.ts`, `core/sanitize.ts`, `core/errors.ts`, `storage/factory.ts`, `deploy/deployer.ts`
-- **Usado por**: `bin/ahub.ts` (comando `ui`), integracao com frontends HTTP
+| `progress` | `SyncProgressEvent` | Progresso por skill e target |
+| `complete` | `SyncResult` | Resultado final do sync |
+| `error` | `{ code, message }` | Falha durante a validacao ou execucao |
 
 ## Efeitos Colaterais
 
-- `GET /api/health`: Le `~/.ahub/config.json`; executa `healthCheck()` no provider (pode fazer `git fetch --dry-run` ou chamada API ao Google Drive)
-- `PUT /api/skills/:name`: Escreve no backend de storage (git commit+push ou upload no Drive)
-- `DELETE /api/skills/:name`: Remove skill do backend (git rm+commit+push ou soft-delete no Drive)
-- `PUT /api/config/:key`: Modifica `~/.ahub/config.json` no disco
-- `DELETE /api/cache`: Remove todos os arquivos em `~/.ahub/cache/`
-- `POST /api/deploy`: Escreve arquivos no filesystem local (override global ou diretorio reconhecido do workspace ativo)
-- `POST /api/workspace/registry`: Pode criar `ahub.workspace.json` no filesystem local antes de registrar o manifesto
-- `GET /api/workspace/suggestions`: Faz leituras rasas em diretorios comuns de trabalho para detectar estruturas conhecidas de skills e sugerir roots de workspace
-- `POST /api/explorer/pick-directory`: Abre o seletor nativo de pastas do sistema operacional local
-- `POST /api/sync` e `GET /api/sync/stream`: Combinam efeitos de storage e deploy (fetch + escrita local)
-- Servico de arquivos estaticos: Le arquivos do `staticDir` e serve com MIME types corretos
+- `GET /api/health`: le configuracao e consulta saude do provider.
+- `PUT`, `PATCH` e `DELETE /api/skills/:name`: alteram o backend de storage.
+- `POST /api/workspace/registry`: pode criar `ahub.workspace.json`; quando `localSkillStrategy=adopt`, tambem observa skills locais e consulta o provider para montar o manifesto inicial.
+- `GET /api/skills/catalog`: lista skills no provider, carrega manifests registrados e observa skills locais detectadas em cada workspace.
+- `PUT /api/workspace`: grava o manifesto no disco apenas apos validar referencias contra o provider.
+- `POST /api/sync` e `GET /api/sync/stream`: validam o manifesto contra o provider antes de combinar fetch remoto e escrita local.
+- `POST /api/explorer/pick-directory`: abre o seletor nativo de pastas do sistema operacional.
 
 ## Decisoes de Design
 
 | Decisao | Justificativa |
 |---------|---------------|
-| Envelope uniforme `{ data }` / `{ error }` | Clientes distinguem sucesso de erro pela presenca de `data` ou `error`, sem depender de HTTP status codes |
-| Error handler centralizado via `app.onError()` | Nenhuma rota precisa fazer try/catch para erros de dominio; mapeamento e automatico |
-| Ordem de instanceof no error handler: especifico -> generico | `AhubError` (base) so e atingido se nenhuma subclasse mais especifica casou antes |
-| SSE com 3 tipos de evento fixos | Cliente sabe que `complete` ou `error` indicam fim da conexao; `progress` sao intermediarios |
-| CORS apenas em dev mode | Em producao, frontend e servido pelo mesmo servidor; em dev, Vite roda em `:5173` |
-| SPA fallback para `index.html` | Requisicoes nao-API que nao correspondem a arquivo estatico retornam index.html para roteamento client-side |
-| Deploy route valida targets antes de processar | Retorna 400 imediatamente para targets invalidos, antes de iniciar qualquer operacao |
+| Envelope uniforme `{ data }` / `{ error }` | Facilita consumo pelos clientes sem depender apenas do status HTTP |
+| Error handler centralizado | Mantem o mapeamento de erros consistente entre todas as rotas |
+| Catalogo unificado em rota dedicada | A UI de `/skills` depende de um unico contrato backend para provider, manifests e deteccao local |
+| Validacao de manifesto antes de save e sync | Evita drift silencioso e falhas parciais de sincronizacao |
+| `skillCount` mantido como alias | Preserva compatibilidade enquanto a UI migra para metrica explicita |
 
 ## Changelog
 
@@ -211,5 +153,5 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | 2025-03-05 | Spec criada |
 | 2026-03-06 | Documentados explorer REST, picker nativo de pasta e registro de workspace por diretorio |
 | 2026-03-06 | Documentado retorno de diretorios reconhecidos por target no payload de workspace |
-| 2026-03-06 | Documentado o contrato de sugestoes de workspace e a regra de exibir apenas workspaces registrados |
 | 2026-03-06 | Documentado sync com workspace explicito para a UI nao depender de `ativo` como acao manual |
+| 2026-03-06 | Atualizada para incluir `/api/skills/catalog`, contadores separados de workspace e validacao de skills do manifesto contra o provider no save/sync |

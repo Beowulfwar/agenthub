@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { loadConfig, requireConfig, listSources, resolveDeployTargetRoot } from '../core/config.js';
+import { loadConfig, requireConfig, listSources, resolveDeployTargetRoot, getWorkspaceRegistry } from '../core/config.js';
 import { createProvider, createAggregateProvider, createProviderFromSource } from '../storage/factory.js';
 import { parseSkill, serializeSkill, validateSkill, getMarkerFile, extractSkillExtensions } from '../core/skill.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
@@ -36,6 +36,31 @@ async function getProvider(source?: string): Promise<StorageProvider> {
   }
 
   return createProvider(config);
+}
+
+/**
+ * Build a map of skill-name → workspace-name[] from the workspace registry.
+ * Used to enrich skill listings with workspace context.
+ */
+async function buildSkillWorkspaceMap(): Promise<Map<string, string[]>> {
+  const registry = await getWorkspaceRegistry();
+  const map = new Map<string, string[]>();
+
+  for (const filePath of registry.paths) {
+    try {
+      const manifest = await loadWorkspaceManifest(filePath);
+      const wsName = manifest.name || path.basename(path.dirname(filePath));
+      for (const r of resolveManifestSkills(manifest)) {
+        const existing = map.get(r.name) ?? [];
+        existing.push(wsName);
+        map.set(r.name, existing);
+      }
+    } catch {
+      // skip broken manifests
+    }
+  }
+
+  return map;
 }
 
 export function registerTools(server: McpServer): void {
@@ -81,8 +106,9 @@ export function registerTools(server: McpServer): void {
       query: z.string().optional().describe('Filter skills by name substring'),
       source: z.string().optional().describe('Only list skills from this source ID'),
       type: CONTENT_TYPE_ENUM.describe('Filter by content type (skill, prompt, subagent)'),
+      includeWorkspace: z.boolean().optional().describe('Include workspace membership info for each skill'),
     },
-    async ({ query, source, type }) => {
+    async ({ query, source, type, includeWorkspace }) => {
       try {
         const provider = await getProvider(source);
         const skills = await provider.list(
@@ -96,7 +122,17 @@ export function registerTools(server: McpServer): void {
           return { content: [{ type: 'text' as const, text: msg }] };
         }
 
-        const list = skills.map((s, i) => `${i + 1}. ${s}`).join('\n');
+        let list: string;
+        if (includeWorkspace) {
+          const wsMap = await buildSkillWorkspaceMap();
+          list = skills.map((s, i) => {
+            const ws = wsMap.get(s);
+            const wsLabel = ws?.length ? ` [${ws.join(', ')}]` : ' [unassigned]';
+            return `${i + 1}. ${s}${wsLabel}`;
+          }).join('\n');
+        } else {
+          list = skills.map((s, i) => `${i + 1}. ${s}`).join('\n');
+        }
         const text = `Found ${skills.length} skill(s):\n\n${list}`;
         return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
@@ -148,8 +184,9 @@ export function registerTools(server: McpServer): void {
       query: z.string().describe('Search query'),
       source: z.string().optional().describe('Source ID to search in'),
       type: CONTENT_TYPE_ENUM.describe('Filter by content type (skill, prompt, subagent)'),
+      includeWorkspace: z.boolean().optional().describe('Include workspace membership info for each skill'),
     },
-    async ({ query, source, type }) => {
+    async ({ query, source, type, includeWorkspace }) => {
       try {
         const provider = await getProvider(source);
         const matches = await provider.list(
@@ -165,11 +202,16 @@ export function registerTools(server: McpServer): void {
         }
 
         // Get descriptions for matched skills
+        const wsMap = includeWorkspace ? await buildSkillWorkspaceMap() : null;
         const results: string[] = [];
         for (const name of matches.slice(0, 20)) {
           try {
             const pkg = await provider.get(name);
-            results.push(`- **${name}**: ${pkg.skill.description}`);
+            const wsLabel = wsMap ? (() => {
+              const ws = wsMap.get(name);
+              return ws?.length ? ` [${ws.join(', ')}]` : ' [unassigned]';
+            })() : '';
+            results.push(`- **${name}**${wsLabel}: ${pkg.skill.description}`);
           } catch {
             results.push(`- **${name}**: (could not load description)`);
           }

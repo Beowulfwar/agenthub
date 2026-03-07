@@ -178,10 +178,98 @@ export interface WorkspaceRegistryEntry {
   manifest: WorkspaceManifest | null;
   /** Whether this is the currently active workspace. */
   isActive: boolean;
-  /** Number of resolved skills. */
+  /** Number of resolved skills configured in the manifest. */
   skillCount: number;
+  /** Alias explicito para a contagem configurada no manifesto. */
+  configuredSkillCount: number;
+  /** Unique skills detected in local well-known directories for this workspace. */
+  detectedSkillCount: number;
+  /** Configured skills that are not currently detected in local directories. */
+  configuredOnlyCount: number;
+  /** Local detected skills that are not declared in the manifest. */
+  detectedOnlyCount: number;
+  /** Configured skills that cannot be found in the provider. */
+  missingInProviderCount: number;
+  /** Total skills in drift or invalid state. */
+  driftCount: number;
   /** Load error message, if the manifest could not be read. */
   error?: string;
+}
+
+/** A local skill-like file or package detected inside a workspace. */
+export interface DetectedLocalSkill {
+  /** Skill identifier inferred from folder name or markdown file name. */
+  name: string;
+  /** Human label of the recognized directory pattern. */
+  label: string;
+  /** Tool family that owns the directory pattern (codex, claude-code, etc.). */
+  tool: string;
+  /** Path of the recognized parent directory (for example `.codex/skills`). */
+  directoryPath: string;
+  /** Absolute path to the detected file or package directory. */
+  absolutePath: string;
+  /** Optional deploy target when the tool maps to a supported target. */
+  target?: DeployTarget;
+}
+
+export type WorkspaceCatalogSkillStatus =
+  | 'configured_and_detected'
+  | 'configured_only'
+  | 'detected_only'
+  | 'missing_in_provider';
+
+/** A workspace-scoped view of one skill in the unified catalog. */
+export interface WorkspaceCatalogSkill {
+  name: string;
+  type: ContentType | null;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  configuredTargets: DeployTarget[];
+  configured: boolean;
+  detectedLocally: boolean;
+  existsInProvider: boolean;
+  status: WorkspaceCatalogSkillStatus;
+  detectedTools: string[];
+}
+
+/** Full catalog entry for one registered workspace. */
+export interface WorkspaceCatalogEntry {
+  filePath: string;
+  workspaceDir: string;
+  workspaceName: string;
+  isActive: boolean;
+  configuredSkillCount: number;
+  detectedSkillCount: number;
+  configuredOnlyCount: number;
+  detectedOnlyCount: number;
+  missingInProviderCount: number;
+  driftCount: number;
+  detectedLocalSkills: DetectedLocalSkill[];
+  skills: WorkspaceCatalogSkill[];
+  error?: string;
+}
+
+/** Unified /api/skills/catalog response payload. */
+export interface SkillsCatalog {
+  providerSkillCount: number;
+  workspaces: WorkspaceCatalogEntry[];
+  unassigned: Array<{
+    name: string;
+    type: ContentType;
+    description: string | null;
+    category: string | null;
+    tags: string[];
+    fileCount: number;
+  }>;
+  invalidWorkspaces: Array<{
+    filePath: string;
+    workspaceDir: string;
+    workspaceName: string;
+    error: string;
+    detectedSkillCount: number;
+  }>;
 }
 
 // ---------------------------------------------------------------------------

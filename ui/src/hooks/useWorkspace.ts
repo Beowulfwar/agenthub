@@ -29,6 +29,8 @@ export function useSaveWorkspace() {
       saveWorkspace(filePath, manifest),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace'] });
+      qc.invalidateQueries({ queryKey: ['workspace-registry'] });
+      qc.invalidateQueries({ queryKey: ['skills', 'catalog'] });
     },
   });
 }
@@ -59,11 +61,13 @@ export function useRegisterWorkspace() {
       directory?: string;
       create?: boolean;
       name?: string;
+      localSkillStrategy?: 'adopt' | 'ignore';
     }) => registerWorkspaceApi(params),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
       qc.invalidateQueries({ queryKey: ['workspace-suggestions'] });
+      qc.invalidateQueries({ queryKey: ['skills', 'catalog'] });
     },
   });
 }
@@ -76,6 +80,7 @@ export function useUnregisterWorkspace() {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
       qc.invalidateQueries({ queryKey: ['workspace-suggestions'] });
+      qc.invalidateQueries({ queryKey: ['skills', 'catalog'] });
     },
   });
 }
@@ -87,6 +92,7 @@ export function useSetActiveWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
+      qc.invalidateQueries({ queryKey: ['skills', 'catalog'] });
     },
   });
 }

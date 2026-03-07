@@ -41,7 +41,9 @@ export function useSync() {
         eventSourceRef.current = null;
         // Invalidate related queries.
         qc.invalidateQueries({ queryKey: ['skills'] });
+        qc.invalidateQueries({ queryKey: ['skills', 'catalog'] });
         qc.invalidateQueries({ queryKey: ['workspace'] });
+        qc.invalidateQueries({ queryKey: ['workspace-registry'] });
       });
 
       es.addEventListener('error', (e) => {

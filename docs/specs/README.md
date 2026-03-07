@@ -16,12 +16,13 @@ Documentacao comportamental spec-driven. Cada spec e' um contrato vivo que docum
 | [core-skill](core-skill.md) | Skill parse/serialize/validate | `src/core/skill.ts` | `tests/specs/core-skill.spec.ts` |
 | [core-config](core-config.md) | Config CRUD | `src/core/config.ts` | `tests/specs/core-config.spec.ts` |
 | [core-workspace](core-workspace.md) | Workspace manifest | `src/core/workspace.ts` | `tests/specs/core-workspace.spec.ts` |
-| [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
+| [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto com adocao de skills locais | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
+| [skills-catalog](skills-catalog.md) | Catalogo unificado de skills por workspace e drift | `ui/src/pages/SkillsPage.tsx` | — |
 | [core-sync](core-sync.md) | Sync engine | `src/core/sync.ts` | `tests/specs/core-sync.spec.ts` |
 | [core-cache](core-cache.md) | Cache com TTL | `src/core/cache.ts` | `tests/specs/core-cache.spec.ts` |
 | [storage-provider](storage-provider.md) | Storage factory + providers | `src/storage/` | — |
 | [deploy-deployer](deploy-deployer.md) | Deploy factory + deployers | `src/deploy/` | — |
-| [api-rest](api-rest.md) | API HTTP REST | `src/api/` | — |
+| [api-rest](api-rest.md) | API HTTP REST com catalogo e validacao de skills | `src/api/` | — |
 
 ## Convencoes
 

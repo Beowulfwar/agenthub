@@ -7,9 +7,11 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { requireConfig, getWorkspaceRegistry } from '../../core/config.js';
 import { findWorkspaceManifest, loadWorkspaceManifest } from '../../core/workspace.js';
+import { validateWorkspaceManifestSkills } from '../../core/workspace-catalog.js';
 import { syncWorkspace } from '../../core/sync.js';
 import type { SyncProgressEvent } from '../../core/types.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
+import { createProvider } from '../../storage/factory.js';
 
 export function syncRoutes(): Hono {
   const app = new Hono();
@@ -36,6 +38,8 @@ export function syncRoutes(): Hono {
     }
 
     const manifest = await loadWorkspaceManifest(manifestPath);
+    const provider = createProvider(config);
+    await validateWorkspaceManifestSkills(manifest, provider, { filter: body.filter });
     const result = await syncWorkspace(manifest, config, {
       ...body,
       workspaceDir: path.dirname(manifestPath),
@@ -68,6 +72,8 @@ export function syncRoutes(): Hono {
         }
 
         const manifest = await loadWorkspaceManifest(manifestPath);
+        const provider = createProvider(config);
+        await validateWorkspaceManifestSkills(manifest, provider, { filter });
 
         const result = await syncWorkspace(manifest, config, {
           force,

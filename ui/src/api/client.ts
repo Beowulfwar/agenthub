@@ -6,6 +6,7 @@ import axios from 'axios';
 import type {
   HealthData,
   SkillSummary,
+  SkillsCatalog,
   SkillPackage,
   SkillInfo,
   PatchSkillRequest,
@@ -19,6 +20,7 @@ import type {
   WorkspaceManifest,
   WorkspaceRegistryEntry,
   WorkspaceSuggestion,
+  RegisterWorkspaceResult,
   BrowseResult,
   ScanResult,
   SuggestionDir,
@@ -58,6 +60,11 @@ export async function fetchSkillsDetailed(query?: string): Promise<SkillSummary[
   const params: Record<string, string> = { detailed: 'true' };
   if (query) params.q = query;
   return unwrap(await api.get<ApiSuccess<SkillSummary[]>>('/skills', { params }));
+}
+
+export async function fetchSkillsCatalog(query?: string): Promise<SkillsCatalog> {
+  const params = query ? { q: query } : {};
+  return unwrap(await api.get<ApiSuccess<SkillsCatalog>>('/skills/catalog', { params }));
 }
 
 export async function fetchSkill(name: string): Promise<SkillPackage> {
@@ -148,14 +155,15 @@ export async function registerWorkspaceApi(
     directory?: string;
     create?: boolean;
     name?: string;
+    localSkillStrategy?: 'adopt' | 'ignore';
   },
-): Promise<{ registered: string; created: boolean }> {
+): Promise<RegisterWorkspaceResult> {
   const payload = body.directory && body.create === undefined
     ? { ...body, create: true }
     : body;
 
   const result = unwrap(
-    await api.post<ApiSuccess<{ registered: string; created: boolean }>>('/workspace/registry', payload),
+    await api.post<ApiSuccess<RegisterWorkspaceResult>>('/workspace/registry', payload),
   );
 
   if (payload.directory) {

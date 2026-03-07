@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchSkills,
+  fetchSkillsCatalog,
   fetchSkillsDetailed,
   fetchSkill,
   updateSkill,
@@ -23,6 +24,13 @@ export function useSkillsDetailed(query?: string) {
   return useQuery({
     queryKey: ['skills', 'detailed', query ?? ''],
     queryFn: () => fetchSkillsDetailed(query),
+  });
+}
+
+export function useSkillsCatalog(query?: string) {
+  return useQuery({
+    queryKey: ['skills', 'catalog', query ?? ''],
+    queryFn: () => fetchSkillsCatalog(query),
   });
 }
 

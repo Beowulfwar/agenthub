@@ -8,11 +8,13 @@
  */
 
 import { Hono } from 'hono';
-import { requireConfig } from '../../core/config.js';
+import { getWorkspaceRegistry, requireConfig } from '../../core/config.js';
 import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { serializeSkill, validateSkill, extractSkillExtensions, getMarkerFile } from '../../core/skill.js';
 import { assertSafeSkillName } from '../../core/sanitize.js';
 import { getSkillStats, formatBytes } from '../../core/stats.js';
+import { buildSkillsCatalog } from '../../core/workspace-catalog.js';
+import { loadWorkspaceManifest } from '../../core/workspace.js';
 import type { StorageProvider } from '../../storage/provider.js';
 import type { AhubConfig, ContentType } from '../../core/types.js';
 
@@ -29,6 +31,32 @@ function getProviderForSource(config: AhubConfig, sourceId?: string): StoragePro
 
 export function skillsRoutes(): Hono {
   const app = new Hono();
+
+  // GET /api/skills/catalog?q=<search>
+  app.get('/catalog', async (c) => {
+    const config = await requireConfig();
+    const provider = createProvider(config);
+    const registry = await getWorkspaceRegistry();
+    const catalog = await buildSkillsCatalog(registry, provider, loadWorkspaceManifest);
+    const query = c.req.query('q')?.trim().toLowerCase();
+
+    if (!query) {
+      return c.json({ data: catalog });
+    }
+
+    return c.json({
+      data: {
+        ...catalog,
+        workspaces: catalog.workspaces
+          .map((workspace) => ({
+            ...workspace,
+            skills: workspace.skills.filter((skill) => matchesCatalogQuery(skill, query)),
+          }))
+          .filter((workspace) => workspace.skills.length > 0),
+        unassigned: catalog.unassigned.filter((skill) => matchesCatalogQuery(skill, query)),
+      },
+    });
+  });
 
   // GET /api/skills?q=<search>&source=<id>&type=<type>&detailed=true
   app.get('/', async (c) => {
@@ -267,4 +295,25 @@ export function skillsRoutes(): Hono {
   });
 
   return app;
+}
+
+function matchesCatalogQuery(
+  skill: {
+    name: string;
+    description?: string | null;
+    category?: string | null;
+    tags?: string[];
+  },
+  query: string,
+): boolean {
+  const haystack = [
+    skill.name,
+    skill.description ?? '',
+    skill.category ?? '',
+    ...(skill.tags ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(query);
 }

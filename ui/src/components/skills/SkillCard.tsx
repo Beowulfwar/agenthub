@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
-import { FileText, Tag, Monitor, ClipboardCopy } from 'lucide-react';
+import { FileText, FolderKanban, Tag, Monitor, ClipboardCopy } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import type { SkillSummary } from '../../api/types';
 
 interface SkillCardProps {
   skill: SkillSummary;
+  /** Workspace name this skill belongs to, if any. */
+  workspaceName?: string;
 }
 
 const TARGET_COLORS: Record<string, string> = {
@@ -14,7 +16,7 @@ const TARGET_COLORS: Record<string, string> = {
   cursor: 'bg-cyan-100 text-cyan-700',
 };
 
-export function SkillCard({ skill }: SkillCardProps) {
+export function SkillCard({ skill, workspaceName }: SkillCardProps) {
   const handleCopy = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -48,8 +50,14 @@ export function SkillCard({ skill }: SkillCardProps) {
         <p className="mt-2 line-clamp-2 text-xs text-gray-500">{skill.description}</p>
       )}
 
-      {/* Footer: tags + targets */}
+      {/* Footer: workspace + tags + targets */}
       <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
+        {workspaceName && (
+          <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            <FolderKanban className="h-3 w-3" />
+            {workspaceName}
+          </span>
+        )}
         {skill.category && (
           <span className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
             <Tag className="h-3 w-3" />

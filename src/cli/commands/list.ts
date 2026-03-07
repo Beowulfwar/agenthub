@@ -5,9 +5,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { requireConfig } from '../../core/config.js';
+import { requireConfig, getWorkspaceRegistry } from '../../core/config.js';
+import { loadWorkspaceManifest, resolveManifestSkills } from '../../core/workspace.js';
 import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import type { ContentType } from '../../core/types.js';
+import path from 'node:path';
 
 export function createListCommand(): Command {
   return new Command('list')
@@ -15,9 +17,10 @@ export function createListCommand(): Command {
     .description('List all available skills')
     .option('-s, --source <id>', 'Only list skills from this source')
     .option('-T, --type <type>', 'Filter by content type (skill, prompt, subagent)')
-    .action(async (opts: { source?: string; type?: string }) => {
+    .option('-w, --workspace', 'Group skills by workspace membership')
+    .action(async (opts: { source?: string; type?: string; workspace?: boolean }) => {
       try {
-        await runList(opts.source, opts.type as ContentType | undefined);
+        await runList(opts.source, opts.type as ContentType | undefined, opts.workspace);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(chalk.red(`Error: ${msg}`));
@@ -30,7 +33,7 @@ export function createListCommand(): Command {
 // Implementation
 // ---------------------------------------------------------------------------
 
-async function runList(sourceId?: string, type?: ContentType): Promise<void> {
+async function runList(sourceId?: string, type?: ContentType, groupByWorkspace?: boolean): Promise<void> {
   const config = await requireConfig();
 
   let provider;
@@ -52,6 +55,11 @@ async function runList(sourceId?: string, type?: ContentType): Promise<void> {
     return;
   }
 
+  if (groupByWorkspace) {
+    await printGroupedByWorkspace(names);
+    return;
+  }
+
   // Formatted table output.
   const header = type ? `  #  ${type.charAt(0).toUpperCase() + type.slice(1)} Name` : '  #  Skill Name';
   console.log('');
@@ -65,4 +73,67 @@ async function runList(sourceId?: string, type?: ContentType): Promise<void> {
 
   console.log('');
   console.log(chalk.dim(`  ${names.length} item(s) total`));
+}
+
+async function printGroupedByWorkspace(allSkills: string[]): Promise<void> {
+  const registry = await getWorkspaceRegistry();
+
+  // Build workspace → skill names mapping
+  interface WsGroup {
+    name: string;
+    isActive: boolean;
+    skills: string[];
+  }
+
+  const groups: WsGroup[] = [];
+  const assignedSkills = new Set<string>();
+
+  for (const filePath of registry.paths) {
+    try {
+      const manifest = await loadWorkspaceManifest(filePath);
+      const wsName = manifest.name || path.basename(path.dirname(filePath));
+      const resolved = resolveManifestSkills(manifest);
+      const skillNames = resolved.map((r) => r.name).filter((n) => allSkills.includes(n));
+      skillNames.forEach((n) => assignedSkills.add(n));
+      if (skillNames.length > 0) {
+        groups.push({
+          name: wsName,
+          isActive: filePath === registry.active,
+          skills: skillNames,
+        });
+      }
+    } catch {
+      // skip broken manifests
+    }
+  }
+
+  const unassigned = allSkills.filter((n) => !assignedSkills.has(n));
+  let counter = 0;
+
+  console.log('');
+  for (const group of groups) {
+    const label = group.isActive ? `${group.name} ${chalk.green('(active)')}` : group.name;
+    console.log(chalk.bold(`  ${label}`));
+    console.log(chalk.dim('  ' + '─'.repeat(40)));
+    for (const skill of group.skills) {
+      counter++;
+      const idx = String(counter).padStart(3, ' ');
+      console.log(`  ${chalk.dim(idx)}  ${skill}`);
+    }
+    console.log('');
+  }
+
+  if (unassigned.length > 0) {
+    console.log(chalk.bold.dim('  Unassigned'));
+    console.log(chalk.dim('  ' + '─'.repeat(40)));
+    for (const skill of unassigned) {
+      counter++;
+      const idx = String(counter).padStart(3, ' ');
+      console.log(`  ${chalk.dim(idx)}  ${skill}`);
+    }
+    console.log('');
+  }
+
+  const wsCount = groups.length;
+  console.log(chalk.dim(`  ${allSkills.length} item(s) total across ${wsCount} workspace(s)`));
 }

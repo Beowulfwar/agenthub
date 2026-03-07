@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useRegisterWorkspace,
   useUnregisterWorkspace,
   useWorkspace,
   useWorkspaceRegistry,
@@ -25,7 +24,7 @@ import { SyncProgress } from '../components/workspace/SyncProgress';
 import { CreateWorkspaceDialog } from '../components/workspace/CreateWorkspaceDialog';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { cn } from '../lib/utils';
-import type { ResolvedSkill, WorkspaceRegistryEntry, WorkspaceSuggestion } from '../api/types';
+import type { WorkspaceCatalogSkillStatus, WorkspaceRegistryEntry, WorkspaceSuggestion } from '../api/types';
 
 type EditorMode = 'form' | 'raw';
 
@@ -38,7 +37,6 @@ interface CreateDialogState {
 export function WorkspacePage() {
   const registry = useWorkspaceRegistry();
   const suggestions = useWorkspaceSuggestions();
-  const registerWorkspace = useRegisterWorkspace();
   const removeWorkspace = useUnregisterWorkspace();
   const { status, progress, result, error, startSync, reset } = useSync();
 
@@ -110,15 +108,8 @@ export function WorkspacePage() {
     }
   };
 
-  const handleAddSuggestion = async (suggestion: WorkspaceSuggestion) => {
-    try {
-      const result = await registerWorkspace.mutateAsync({ directory: suggestion.workspaceDir });
-      await Promise.all([registry.refetch(), suggestions.refetch()]);
-      setSelectedPath(result.registered);
-      toast.success(`Workspace "${lastPathSegment(suggestion.workspaceDir)}" adicionado a lista`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Nao foi possivel adicionar o workspace sugerido');
-    }
+  const handleAddSuggestion = (suggestion: WorkspaceSuggestion) => {
+    openCreateDialog(suggestion.workspaceDir, lastPathSegment(suggestion.workspaceDir));
   };
 
   const handleSyncWorkspace = async (force = false) => {
@@ -224,9 +215,14 @@ export function WorkspacePage() {
                               {entry.workspaceDir}
                             </p>
                           </div>
-                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                            {entry.skillCount} skill{entry.skillCount === 1 ? '' : 's'}
-                          </span>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                              {entry.configuredSkillCount} configurada{entry.configuredSkillCount === 1 ? '' : 's'}
+                            </span>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                              {entry.detectedSkillCount} local
+                            </span>
+                          </div>
                         </div>
 
                         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -242,6 +238,16 @@ export function WorkspacePage() {
                           ) : (
                             <span className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-inset ring-gray-200">
                               Sem destinos padrao
+                            </span>
+                          )}
+                          {entry.driftCount > 0 && (
+                            <span className="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                              {entry.driftCount} drift
+                            </span>
+                          )}
+                          {entry.missingInProviderCount > 0 && (
+                            <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600 ring-1 ring-inset ring-red-200">
+                              {entry.missingInProviderCount} fora do provider
                             </span>
                           )}
                           {entry.error && (
@@ -300,8 +306,8 @@ export function WorkspacePage() {
                         {selectedEntry.workspaceDir}
                       </p>
                       <p className="mt-3 max-w-2xl text-sm text-gray-500">
-                        Este painel controla somente o workspace selecionado. Skills sincronizadas e
-                        destinos de agentes nao aparecem para pastas fora desta lista.
+                        Este painel cruza manifesto, provider e disco local para mostrar quais
+                        skills estao configuradas, quais ja existem na pasta e onde ainda ha drift.
                       </p>
                     </div>
 
@@ -374,6 +380,29 @@ export function WorkspacePage() {
                   </button>
                 </div>
 
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <SummaryCard
+                    title="Skills configuradas"
+                    value={workspace.data?.catalog?.configuredSkillCount ?? selectedEntry.configuredSkillCount}
+                    hint="Quantidade declarada no manifesto deste workspace"
+                  />
+                  <SummaryCard
+                    title="Detectadas localmente"
+                    value={workspace.data?.catalog?.detectedSkillCount ?? selectedEntry.detectedSkillCount}
+                    hint="Skills que o scanner encontrou nas pastas locais reconhecidas"
+                  />
+                  <SummaryCard
+                    title="Drift"
+                    value={workspace.data?.catalog?.driftCount ?? selectedEntry.driftCount}
+                    hint="Diferencas entre manifesto, provider e o que existe no disco"
+                  />
+                  <SummaryCard
+                    title="Fora do provider"
+                    value={workspace.data?.catalog?.missingInProviderCount ?? selectedEntry.missingInProviderCount}
+                    hint="Referencias em manifesto que nao existem mais na fonte oficial"
+                  />
+                </div>
+
                 {workspace.isLoading ? (
                   <LoadingSpinner className="py-24" size="lg" label="Carregando detalhes do workspace..." />
                 ) : workspace.data?.manifest ? (
@@ -397,32 +426,54 @@ export function WorkspacePage() {
                   </div>
                 )}
 
-                {workspace.data?.resolved && workspace.data.resolved.length > 0 ? (
+                {workspace.data?.catalog && workspace.data.catalog.skills.length > 0 ? (
                   <section className="rounded-2xl border border-gray-200 bg-white">
                     <div className="border-b border-gray-200 px-5 py-3">
                       <h3 className="text-sm font-semibold text-gray-700">
-                        Skills deste workspace ({workspace.data.resolved.length})
+                        Estado das skills neste workspace ({workspace.data.catalog.skills.length})
                       </h3>
                       <p className="mt-1 text-xs text-gray-400">
-                        Estas sao as skills que o sync vai baixar para o workspace selecionado.
+                        O sync usa as skills configuradas no manifesto. As demais aparecem aqui para
+                        deixar o drift explicito.
                       </p>
                     </div>
                     <div className="divide-y divide-gray-100">
-                      {workspace.data.resolved.map((resolvedSkill: ResolvedSkill) => (
+                      {workspace.data.catalog.skills.map((catalogSkill) => (
                         <div
-                          key={resolvedSkill.name}
-                          className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"
+                          key={catalogSkill.name}
+                          className="flex flex-col gap-3 px-5 py-3 lg:flex-row lg:items-start lg:justify-between"
                         >
-                          <span className="font-mono text-sm font-medium text-gray-900">
-                            {resolvedSkill.name}
-                          </span>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-sm font-medium text-gray-900">
+                                {catalogSkill.name}
+                              </span>
+                              <WorkspaceSkillStatusBadge status={catalogSkill.status} />
+                              {!catalogSkill.existsInProvider && (
+                                <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600">
+                                  Nao sincronizavel
+                                </span>
+                              )}
+                            </div>
+                            {catalogSkill.description && (
+                              <p className="mt-1 text-sm text-gray-500">{catalogSkill.description}</p>
+                            )}
+                          </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {resolvedSkill.targets.map((target) => (
+                            {catalogSkill.configuredTargets.map((target) => (
                               <span
-                                key={target}
+                                key={`${catalogSkill.name}-${target}`}
                                 className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
                               >
                                 {target}
+                              </span>
+                            ))}
+                            {catalogSkill.detectedTools.map((tool) => (
+                              <span
+                                key={`${catalogSkill.name}-${tool}`}
+                                className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+                              >
+                                Local em {tool}
                               </span>
                             ))}
                           </div>
@@ -435,8 +486,8 @@ export function WorkspacePage() {
                     <Sparkles className="mx-auto h-8 w-8 text-gray-300" />
                     <h3 className="mt-3 text-sm font-semibold text-gray-900">Workspace sem skills</h3>
                     <p className="mt-2 text-sm text-gray-500">
-                      Este projeto pode continuar vazio por enquanto. Adicione skills quando quiser
-                      baixar conteudo para ele.
+                      Este projeto ainda nao tem skills configuradas nem detectadas localmente. O
+                      manifesto pode continuar vazio por enquanto.
                     </p>
                   </section>
                 ) : null}
@@ -577,13 +628,13 @@ function SuggestionPanel({
                   className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Adicionar
+                  Registrar
                 </button>
                 <button
-                  onClick={() => onOpenCreate(suggestion.workspaceDir)}
+                  onClick={() => onOpenCreate()}
                   className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  Revisar antes
+                  Escolher outra pasta
                 </button>
               </div>
             </div>
@@ -609,6 +660,33 @@ function SummaryCard({
       <p className="mt-2 text-2xl font-semibold text-gray-900">{value}</p>
       <p className="mt-1 text-xs text-gray-400">{hint}</p>
     </div>
+  );
+}
+
+function WorkspaceSkillStatusBadge({ status }: { status: WorkspaceCatalogSkillStatus }) {
+  const meta: Record<WorkspaceCatalogSkillStatus, { label: string; className: string }> = {
+    configured_and_detected: {
+      label: 'Manifesto + local',
+      className: 'bg-emerald-100 text-emerald-700',
+    },
+    configured_only: {
+      label: 'So manifesto',
+      className: 'bg-amber-100 text-amber-700',
+    },
+    detected_only: {
+      label: 'So local',
+      className: 'bg-slate-100 text-slate-700',
+    },
+    missing_in_provider: {
+      label: 'Fora do provider',
+      className: 'bg-red-100 text-red-700',
+    },
+  };
+
+  return (
+    <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', meta[status].className)}>
+      {meta[status].label}
+    </span>
   );
 }
 
