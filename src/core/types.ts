@@ -251,25 +251,71 @@ export interface WorkspaceCatalogEntry {
   error?: string;
 }
 
+export type CloudSkillInstallState = 'installed' | 'not_installed' | 'unknown';
+
+export interface CloudSkillCatalogItem {
+  name: string;
+  type: ContentType;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  installState: CloudSkillInstallState;
+}
+
+export interface CloudSkillCatalogFilters {
+  types: ContentType[];
+  categories: string[];
+  tags: string[];
+  installStates: CloudSkillInstallState[];
+}
+
+export interface CloudSkillCatalogDestinationScope {
+  workspaceFilePath: string | null;
+  workspaceName: string | null;
+  workspaceDir: string | null;
+  target: DeployTarget | null;
+  ready: boolean;
+}
+
 /** Unified /api/skills/catalog response payload. */
 export interface SkillsCatalog {
-  providerSkillCount: number;
-  workspaces: WorkspaceCatalogEntry[];
-  unassigned: Array<{
-    name: string;
-    type: ContentType;
-    description: string | null;
-    category: string | null;
-    tags: string[];
-    fileCount: number;
-  }>;
-  invalidWorkspaces: Array<{
-    filePath: string;
-    workspaceDir: string;
-    workspaceName: string;
-    error: string;
-    detectedSkillCount: number;
-  }>;
+  total: number;
+  items: CloudSkillCatalogItem[];
+  availableFilters: CloudSkillCatalogFilters;
+  destinationScope: CloudSkillCatalogDestinationScope;
+  counts: Record<CloudSkillInstallState, number>;
+}
+
+export type WorkspaceAgentSkillStatus =
+  | 'manifest_and_installed'
+  | 'manifest_missing_local'
+  | 'local_outside_manifest'
+  | 'missing_in_provider';
+
+export interface WorkspaceAgentSkill {
+  name: string;
+  type: ContentType | null;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  status: WorkspaceAgentSkillStatus;
+  inManifest: boolean;
+  installedLocally: boolean;
+  existsInProvider: boolean;
+  localPaths: string[];
+}
+
+export interface WorkspaceAgentInventory {
+  target: DeployTarget;
+  label: string;
+  source: 'workspace-local' | 'config-override' | 'tool-default';
+  rootPath: string;
+  skillPath: string;
+  exists: boolean;
+  counts: Record<WorkspaceAgentSkillStatus, number> & { total: number };
+  skills: WorkspaceAgentSkill[];
 }
 
 // ---------------------------------------------------------------------------

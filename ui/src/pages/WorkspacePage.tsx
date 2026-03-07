@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Plus,
-  Trash2,
-  RefreshCw,
-  Zap,
+  AlertTriangle,
   Code,
-  LayoutList,
   FolderKanban,
-  Sparkles,
   FolderSearch,
+  HardDrive,
+  LayoutList,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -24,15 +25,39 @@ import { SyncProgress } from '../components/workspace/SyncProgress';
 import { CreateWorkspaceDialog } from '../components/workspace/CreateWorkspaceDialog';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { cn } from '../lib/utils';
-import type { WorkspaceCatalogSkillStatus, WorkspaceRegistryEntry, WorkspaceSuggestion } from '../api/types';
+import type {
+  DeployTarget,
+  WorkspaceAgentInventory,
+  WorkspaceAgentSkillStatus,
+  WorkspaceRegistryEntry,
+  WorkspaceSuggestion,
+} from '../api/types';
 
 type EditorMode = 'form' | 'raw';
+type LocalInventoryFilter = 'all' | WorkspaceAgentSkillStatus;
 
 interface CreateDialogState {
   open: boolean;
   initialDirectory?: string;
   initialName?: string;
 }
+
+const LOCAL_FILTER_OPTIONS: Array<{
+  value: LocalInventoryFilter;
+  label: string;
+}> = [
+  { value: 'all', label: 'Todas' },
+  { value: 'manifest_and_installed', label: 'No manifesto + local' },
+  { value: 'manifest_missing_local', label: 'No manifesto, ausente' },
+  { value: 'local_outside_manifest', label: 'Local, fora do manifesto' },
+  { value: 'missing_in_provider', label: 'Ausente no provider' },
+];
+
+const AGENT_BADGE_STYLES: Record<DeployTarget, string> = {
+  'claude-code': 'border-orange-200 bg-orange-50 text-orange-700',
+  codex: 'border-blue-200 bg-blue-50 text-blue-700',
+  cursor: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+};
 
 export function WorkspacePage() {
   const registry = useWorkspaceRegistry();
@@ -43,6 +68,8 @@ export function WorkspacePage() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>('form');
   const [dialogState, setDialogState] = useState<CreateDialogState>({ open: false });
+  const [selectedAgentTarget, setSelectedAgentTarget] = useState<DeployTarget | null>(null);
+  const [inventoryFilter, setInventoryFilter] = useState<LocalInventoryFilter>('all');
 
   const registeredEntries = registry.data ?? [];
 
@@ -61,10 +88,46 @@ export function WorkspacePage() {
     setSelectedPath(nextSelection);
   }, [registeredEntries, selectedPath]);
 
+  useEffect(() => {
+    setInventoryFilter('all');
+  }, [selectedPath]);
+
   const selectedEntry =
     registeredEntries.find((entry) => entry.filePath === selectedPath) ?? null;
 
   const workspace = useWorkspace(selectedPath, { enabled: Boolean(selectedPath) });
+
+  useEffect(() => {
+    const agents = workspace.data?.agents ?? [];
+
+    if (agents.length === 0) {
+      setSelectedAgentTarget(null);
+      return;
+    }
+
+    if (selectedAgentTarget && agents.some((agent) => agent.target === selectedAgentTarget)) {
+      return;
+    }
+
+    setSelectedAgentTarget(agents[0]?.target ?? null);
+  }, [selectedAgentTarget, workspace.data?.agents]);
+
+  const selectedAgent = useMemo(
+    () => workspace.data?.agents.find((agent) => agent.target === selectedAgentTarget) ?? null,
+    [selectedAgentTarget, workspace.data?.agents],
+  );
+
+  const filteredAgentSkills = useMemo(() => {
+    if (!selectedAgent) {
+      return [];
+    }
+
+    if (inventoryFilter === 'all') {
+      return selectedAgent.skills;
+    }
+
+    return selectedAgent.skills.filter((skill) => skill.status === inventoryFilter);
+  }, [inventoryFilter, selectedAgent]);
 
   const registeredDirs = useMemo(
     () => new Set(registeredEntries.map((entry) => entry.workspaceDir)),
@@ -134,8 +197,8 @@ export function WorkspacePage() {
           <div className="max-w-3xl">
             <h1 className="text-2xl font-semibold text-gray-900">Gerenciar workspaces</h1>
             <p className="mt-2 text-sm text-gray-500">
-              Cadastre, nomeie e organize varios workspaces locais. Qualquer pasta pode virar um
-              workspace, mas skills e prompts so aparecem aqui quando a pasta entra nesta lista.
+              Cadastre projetos locais, revise cada agente separadamente e trate aqui o que esta
+              no manifesto, o que existe no disco e o que saiu do provider oficial.
             </p>
           </div>
           <button
@@ -151,17 +214,17 @@ export function WorkspacePage() {
           <SummaryCard
             title="Workspaces cadastrados"
             value={registeredEntries.length}
-            hint="Lista usada para gerenciar e consultar projetos locais"
+            hint="Lista usada para diagnosticar e sincronizar projetos locais"
           />
           <SummaryCard
             title="Prontos para uso"
             value={readyCount}
-            hint="Workspaces sem erro de leitura e prontos para edicao ou sync"
+            hint="Workspaces sem erro de leitura e com inventario disponivel"
           />
           <SummaryCard
             title="Com erro"
             value={errorCount}
-            hint="Projetos que precisam ser revisados ou registrados novamente"
+            hint="Projetos que precisam de ajuste de manifesto ou novo registro"
           />
         </div>
       </section>
@@ -291,7 +354,7 @@ export function WorkspacePage() {
                 <FolderSearch className="mx-auto h-10 w-10 text-gray-300" />
                 <h2 className="mt-4 text-lg font-semibold text-gray-900">Selecione um workspace</h2>
                 <p className="mt-2 text-sm text-gray-500">
-                  Escolha um item da lista para editar nome, skills e destinos reconhecidos pelos agentes.
+                  Escolha um item da lista para revisar agentes, drift local e o manifesto do projeto.
                 </p>
               </div>
             ) : (
@@ -306,8 +369,9 @@ export function WorkspacePage() {
                         {selectedEntry.workspaceDir}
                       </p>
                       <p className="mt-3 max-w-2xl text-sm text-gray-500">
-                        Este painel cruza manifesto, provider e disco local para mostrar quais
-                        skills estao configuradas, quais ja existem na pasta e onde ainda ha drift.
+                        Use esta tela para diagnosticar o estado local por agente. O manifesto continua
+                        sendo a referencia do que deveria existir, enquanto o disco mostra o que esta
+                        instalado de fato.
                       </p>
                     </div>
 
@@ -353,33 +417,6 @@ export function WorkspacePage() {
                   </div>
                 )}
 
-                <div className="flex w-fit items-center gap-1 rounded-lg bg-gray-100 p-1">
-                  <button
-                    onClick={() => setEditorMode('form')}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                      editorMode === 'form'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700',
-                    )}
-                  >
-                    <LayoutList className="h-3.5 w-3.5" />
-                    Formulario
-                  </button>
-                  <button
-                    onClick={() => setEditorMode('raw')}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                      editorMode === 'raw'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700',
-                    )}
-                  >
-                    <Code className="h-3.5 w-3.5" />
-                    JSON cru
-                  </button>
-                </div>
-
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <SummaryCard
                     title="Skills configuradas"
@@ -405,92 +442,73 @@ export function WorkspacePage() {
 
                 {workspace.isLoading ? (
                   <LoadingSpinner className="py-24" size="lg" label="Carregando detalhes do workspace..." />
-                ) : workspace.data?.manifest ? (
-                  editorMode === 'form' ? (
-                    <WorkspaceForm
-                      manifest={workspace.data.manifest}
-                      filePath={workspace.data.filePath ?? selectedEntry.filePath}
-                      workspaceDir={workspace.data.workspaceDir ?? selectedEntry.workspaceDir}
-                      targetDirectories={workspace.data.targetDirectories ?? []}
-                    />
-                  ) : (
-                    <ManifestEditor
-                      manifest={workspace.data.manifest}
-                      filePath={workspace.data.filePath ?? selectedEntry.filePath}
-                    />
-                  )
                 ) : (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
-                    {workspace.data?.error ??
-                      'O arquivo do workspace nao pode ser carregado. Remova o item da lista ou registre a pasta novamente.'}
-                  </div>
-                )}
+                  <>
+                    {workspace.data?.error && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+                        {workspace.data.error}
+                      </div>
+                    )}
 
-                {workspace.data?.catalog && workspace.data.catalog.skills.length > 0 ? (
-                  <section className="rounded-2xl border border-gray-200 bg-white">
-                    <div className="border-b border-gray-200 px-5 py-3">
-                      <h3 className="text-sm font-semibold text-gray-700">
-                        Estado das skills neste workspace ({workspace.data.catalog.skills.length})
-                      </h3>
-                      <p className="mt-1 text-xs text-gray-400">
-                        O sync usa as skills configuradas no manifesto. As demais aparecem aqui para
-                        deixar o drift explicito.
-                      </p>
+                    <WorkspaceAgentSection
+                      agents={workspace.data?.agents ?? []}
+                      selectedTarget={selectedAgentTarget}
+                      onSelectTarget={setSelectedAgentTarget}
+                      inventoryFilter={inventoryFilter}
+                      onChangeInventoryFilter={setInventoryFilter}
+                      selectedAgent={selectedAgent}
+                      filteredAgentSkills={filteredAgentSkills}
+                    />
+
+                    <div className="flex w-fit items-center gap-1 rounded-lg bg-gray-100 p-1">
+                      <button
+                        onClick={() => setEditorMode('form')}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                          editorMode === 'form'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700',
+                        )}
+                      >
+                        <LayoutList className="h-3.5 w-3.5" />
+                        Formulario
+                      </button>
+                      <button
+                        onClick={() => setEditorMode('raw')}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                          editorMode === 'raw'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-700',
+                        )}
+                      >
+                        <Code className="h-3.5 w-3.5" />
+                        JSON cru
+                      </button>
                     </div>
-                    <div className="divide-y divide-gray-100">
-                      {workspace.data.catalog.skills.map((catalogSkill) => (
-                        <div
-                          key={catalogSkill.name}
-                          className="flex flex-col gap-3 px-5 py-3 lg:flex-row lg:items-start lg:justify-between"
-                        >
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-sm font-medium text-gray-900">
-                                {catalogSkill.name}
-                              </span>
-                              <WorkspaceSkillStatusBadge status={catalogSkill.status} />
-                              {!catalogSkill.existsInProvider && (
-                                <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600">
-                                  Nao sincronizavel
-                                </span>
-                              )}
-                            </div>
-                            {catalogSkill.description && (
-                              <p className="mt-1 text-sm text-gray-500">{catalogSkill.description}</p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {catalogSkill.configuredTargets.map((target) => (
-                              <span
-                                key={`${catalogSkill.name}-${target}`}
-                                className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-                              >
-                                {target}
-                              </span>
-                            ))}
-                            {catalogSkill.detectedTools.map((tool) => (
-                              <span
-                                key={`${catalogSkill.name}-${tool}`}
-                                className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
-                              >
-                                Local em {tool}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                ) : selectedEntry && workspace.data?.manifest ? (
-                  <section className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-10 text-center">
-                    <Sparkles className="mx-auto h-8 w-8 text-gray-300" />
-                    <h3 className="mt-3 text-sm font-semibold text-gray-900">Workspace sem skills</h3>
-                    <p className="mt-2 text-sm text-gray-500">
-                      Este projeto ainda nao tem skills configuradas nem detectadas localmente. O
-                      manifesto pode continuar vazio por enquanto.
-                    </p>
-                  </section>
-                ) : null}
+
+                    {workspace.data?.manifest ? (
+                      editorMode === 'form' ? (
+                        <WorkspaceForm
+                          manifest={workspace.data.manifest}
+                          filePath={workspace.data.filePath ?? selectedEntry.filePath}
+                          workspaceDir={workspace.data.workspaceDir ?? selectedEntry.workspaceDir}
+                          targetDirectories={workspace.data.targetDirectories ?? []}
+                        />
+                      ) : (
+                        <ManifestEditor
+                          manifest={workspace.data.manifest}
+                          filePath={workspace.data.filePath ?? selectedEntry.filePath}
+                        />
+                      )
+                    ) : (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+                        {workspace.data?.error ??
+                          'O arquivo do workspace nao pode ser carregado. Remova o item da lista ou registre a pasta novamente.'}
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
           </section>
@@ -505,6 +523,218 @@ export function WorkspacePage() {
         />
       )}
     </div>
+  );
+}
+
+function WorkspaceAgentSection({
+  agents,
+  selectedTarget,
+  onSelectTarget,
+  inventoryFilter,
+  onChangeInventoryFilter,
+  selectedAgent,
+  filteredAgentSkills,
+}: {
+  agents: WorkspaceAgentInventory[];
+  selectedTarget: DeployTarget | null;
+  onSelectTarget: (target: DeployTarget) => void;
+  inventoryFilter: LocalInventoryFilter;
+  onChangeInventoryFilter: (value: LocalInventoryFilter) => void;
+  selectedAgent: WorkspaceAgentInventory | null;
+  filteredAgentSkills: WorkspaceAgentInventory['skills'];
+}) {
+  if (agents.length === 0) {
+    return (
+      <section className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+        <HardDrive className="mx-auto h-8 w-8 text-gray-300" />
+        <h3 className="mt-3 text-sm font-semibold text-gray-900">Nenhum agente reconhecido</h3>
+        <p className="mt-2 text-sm text-gray-500">
+          O workspace ainda nao expoe diretorios de destino para Claude Code, Codex ou Cursor.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-200 px-5 py-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Inventario local por agente</h3>
+            <p className="mt-1 text-xs text-gray-400">
+              Cada aba mostra apenas o destino local daquele agente e os estados de drift relativos
+              ao manifesto do workspace.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {LOCAL_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => onChangeInventoryFilter(option.value)}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                  inventoryFilter === option.value
+                    ? 'border-brand-300 bg-brand-50 text-brand-700'
+                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700',
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {agents.map((agent) => {
+            const selected = agent.target === selectedTarget;
+            const driftCount =
+              agent.counts.manifest_missing_local
+              + agent.counts.local_outside_manifest
+              + agent.counts.missing_in_provider;
+
+            return (
+              <button
+                key={agent.target}
+                onClick={() => onSelectTarget(agent.target)}
+                className={cn(
+                  'rounded-xl border p-3 text-left transition-colors',
+                  selected
+                    ? 'border-brand-300 bg-brand-50/50'
+                    : 'border-gray-200 bg-gray-50 hover:border-gray-300',
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', AGENT_BADGE_STYLES[agent.target])}>
+                    {agent.label}
+                  </span>
+                  <span className="text-xs text-gray-400">{agent.counts.total} skill{agent.counts.total === 1 ? '' : 's'}</span>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">{agent.skillPath}</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                    {agent.counts.manifest_and_installed} ok
+                  </span>
+                  <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                    {driftCount} drift
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {selectedAgent ? (
+        <div className="space-y-4 p-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <SummaryCard
+              title="Manifesto + instalado"
+              value={selectedAgent.counts.manifest_and_installed}
+              hint="Skills presentes no manifesto e no disco deste agente"
+            />
+            <SummaryCard
+              title="No manifesto, ausente"
+              value={selectedAgent.counts.manifest_missing_local}
+              hint="Skills que deveriam existir localmente, mas ainda nao foram instaladas"
+            />
+            <SummaryCard
+              title="Local, fora do manifesto"
+              value={selectedAgent.counts.local_outside_manifest}
+              hint="Conteudo local detectado que nao esta declarado no workspace"
+            />
+            <SummaryCard
+              title="Ausente no provider"
+              value={selectedAgent.counts.missing_in_provider}
+              hint="Referencias do manifesto que nao existem mais no catalogo da nuvem"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', AGENT_BADGE_STYLES[selectedAgent.target])}>
+                {selectedAgent.label}
+              </span>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                Origem: {selectedAgent.source}
+              </span>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                Pasta {selectedAgent.exists ? 'disponivel' : 'ainda nao criada'}
+              </span>
+            </div>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Root path</p>
+            <p className="mt-1 break-all font-mono text-xs text-gray-600">{selectedAgent.rootPath}</p>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Pasta de skills</p>
+            <p className="mt-1 break-all font-mono text-xs text-gray-600">{selectedAgent.skillPath}</p>
+          </div>
+
+          {filteredAgentSkills.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
+              <AlertTriangle className="mx-auto h-8 w-8 text-gray-300" />
+              <h3 className="mt-3 text-sm font-semibold text-gray-900">Nenhuma skill neste filtro</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                Ajuste o filtro de inventario para revisar outros estados deste agente.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredAgentSkills.map((skill) => (
+                <div key={`${selectedAgent.target}-${skill.name}`} className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-sm font-semibold text-gray-900">{skill.name}</span>
+                        <AgentSkillStatusBadge status={skill.status} />
+                        {skill.type && (
+                          <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                            {skill.type}
+                          </span>
+                        )}
+                      </div>
+                      {skill.description && (
+                        <p className="mt-2 text-sm text-gray-500">{skill.description}</p>
+                      )}
+                      {skill.localPaths.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                            Paths locais
+                          </p>
+                          {skill.localPaths.map((localPath) => (
+                            <p key={localPath} className="break-all font-mono text-xs text-gray-500">
+                              {localPath}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {skill.category && (
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                          {skill.category}
+                        </span>
+                      )}
+                      {skill.tags.slice(0, 4).map((tag) => (
+                        <span
+                          key={`${skill.name}-${tag}`}
+                          className="rounded bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                      {skill.fileCount > 0 && (
+                        <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                          {skill.fileCount} arquivo{skill.fileCount === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -528,8 +758,7 @@ function EmptyWorkspaceState({
         <h2 className="mt-4 text-xl font-semibold text-gray-900">Nenhum workspace cadastrado</h2>
         <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-500">
           O gerenciamento comeca quando voce registra pastas nesta lista. Depois disso fica facil
-          revisar os projetos cadastrados, escolher um workspace na lista e controlar quais skills cada
-          um usa.
+          revisar os projetos cadastrados, separar o inventario por agente e controlar o drift local.
         </p>
         <button
           onClick={onOpenCreate}
@@ -663,22 +892,22 @@ function SummaryCard({
   );
 }
 
-function WorkspaceSkillStatusBadge({ status }: { status: WorkspaceCatalogSkillStatus }) {
-  const meta: Record<WorkspaceCatalogSkillStatus, { label: string; className: string }> = {
-    configured_and_detected: {
-      label: 'Manifesto + local',
+function AgentSkillStatusBadge({ status }: { status: WorkspaceAgentSkillStatus }) {
+  const meta: Record<WorkspaceAgentSkillStatus, { label: string; className: string }> = {
+    manifest_and_installed: {
+      label: 'Manifesto + instalado',
       className: 'bg-emerald-100 text-emerald-700',
     },
-    configured_only: {
-      label: 'So manifesto',
+    manifest_missing_local: {
+      label: 'No manifesto, ausente',
       className: 'bg-amber-100 text-amber-700',
     },
-    detected_only: {
-      label: 'So local',
+    local_outside_manifest: {
+      label: 'Local, fora do manifesto',
       className: 'bg-slate-100 text-slate-700',
     },
     missing_in_provider: {
-      label: 'Fora do provider',
+      label: 'Ausente no provider',
       className: 'bg-red-100 text-red-700',
     },
   };

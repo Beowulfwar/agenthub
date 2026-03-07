@@ -23,6 +23,7 @@ import type { WorkspaceManifest, WorkspaceRegistryEntry } from '../../core/types
 import { ProviderNotConfiguredError } from '../../core/errors.js';
 import {
   buildAdoptedManifestSkills,
+  buildWorkspaceAgentInventories,
   buildWorkspaceCatalogEntry,
   loadProviderSkillIndex,
   validateWorkspaceManifestSkills,
@@ -230,6 +231,7 @@ export function workspaceRoutes(): Hono {
           workspaceDir: null,
           resolved: [],
           targetDirectories: [],
+          agents: [],
         },
       });
     }
@@ -248,8 +250,14 @@ export function workspaceRoutes(): Hono {
         manifest,
         providerIndex,
       });
+      const agents = await buildWorkspaceAgentInventories({
+        workspaceDir,
+        manifest,
+        targetDirectories,
+        providerIndex,
+      });
       return c.json({
-        data: { manifest, filePath, workspaceDir, resolved, targetDirectories, catalog },
+        data: { manifest, filePath, workspaceDir, resolved, targetDirectories, agents, catalog },
       });
     } catch (err) {
       // File might not exist anymore — return gracefully
@@ -261,6 +269,12 @@ export function workspaceRoutes(): Hono {
         loadError,
         providerIndex,
       });
+      const agents = await buildWorkspaceAgentInventories({
+        workspaceDir,
+        manifest: null,
+        targetDirectories,
+        providerIndex,
+      });
       return c.json({
         data: {
           manifest: null,
@@ -268,6 +282,7 @@ export function workspaceRoutes(): Hono {
           workspaceDir,
           resolved: [],
           targetDirectories,
+          agents,
           catalog,
           error: loadError,
         },

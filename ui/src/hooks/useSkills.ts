@@ -11,7 +11,7 @@ import {
   renameSkill,
   fetchSkillInfo,
 } from '../api/client';
-import type { SkillPackage, PatchSkillRequest } from '../api/types';
+import type { CloudSkillInstallState, DeployTarget, SkillPackage, PatchSkillRequest } from '../api/types';
 
 export function useSkillsList(query?: string) {
   return useQuery({
@@ -27,10 +27,18 @@ export function useSkillsDetailed(query?: string) {
   });
 }
 
-export function useSkillsCatalog(query?: string) {
+export function useSkillsCatalog(filters?: {
+  q?: string;
+  workspaceFilePath?: string;
+  target?: DeployTarget;
+  type?: 'skill' | 'prompt' | 'subagent';
+  category?: string;
+  tag?: string;
+  installState?: CloudSkillInstallState;
+}) {
   return useQuery({
-    queryKey: ['skills', 'catalog', query ?? ''],
-    queryFn: () => fetchSkillsCatalog(query),
+    queryKey: ['skills', 'catalog', filters ?? {}],
+    queryFn: () => fetchSkillsCatalog(filters),
   });
 }
 

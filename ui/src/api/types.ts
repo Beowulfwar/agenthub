@@ -44,6 +44,33 @@ export interface SkillSummary {
   fileCount?: number;
 }
 
+export type CloudSkillInstallState = 'installed' | 'not_installed' | 'unknown';
+
+export interface CloudSkillCatalogItem {
+  name: string;
+  type: 'skill' | 'prompt' | 'subagent';
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  installState: CloudSkillInstallState;
+}
+
+export interface CloudSkillCatalogFilters {
+  types: Array<'skill' | 'prompt' | 'subagent'>;
+  categories: string[];
+  tags: string[];
+  installStates: CloudSkillInstallState[];
+}
+
+export interface CloudSkillCatalogDestinationScope {
+  workspaceFilePath: string | null;
+  workspaceName: string | null;
+  workspaceDir: string | null;
+  target: DeployTarget | null;
+  ready: boolean;
+}
+
 export type WorkspaceCatalogSkillStatus =
   | 'configured_and_detected'
   | 'configured_only'
@@ -144,7 +171,9 @@ export type DeployTarget = 'claude-code' | 'codex' | 'cursor';
 
 export interface DeployRequest {
   skills: string[];
-  targets: DeployTarget[];
+  targets?: DeployTarget[];
+  target?: DeployTarget;
+  workspaceFilePath?: string;
 }
 
 export interface DeployedEntry {
@@ -213,6 +242,7 @@ export interface WorkspaceData {
   workspaceDir: string | null;
   resolved: ResolvedSkill[];
   targetDirectories: DeployTargetDirectory[];
+  agents: WorkspaceAgentInventory[];
   catalog?: WorkspaceCatalogEntry | null;
   error?: string;
 }
@@ -259,23 +289,42 @@ export interface WorkspaceSuggestion {
 }
 
 export interface SkillsCatalog {
-  providerSkillCount: number;
-  workspaces: WorkspaceCatalogEntry[];
-  unassigned: Array<{
-    name: string;
-    type: 'skill' | 'prompt' | 'subagent';
-    description: string | null;
-    category: string | null;
-    tags: string[];
-    fileCount: number;
-  }>;
-  invalidWorkspaces: Array<{
-    filePath: string;
-    workspaceDir: string;
-    workspaceName: string;
-    error: string;
-    detectedSkillCount: number;
-  }>;
+  total: number;
+  items: CloudSkillCatalogItem[];
+  availableFilters: CloudSkillCatalogFilters;
+  destinationScope: CloudSkillCatalogDestinationScope;
+  counts: Record<CloudSkillInstallState, number>;
+}
+
+export type WorkspaceAgentSkillStatus =
+  | 'manifest_and_installed'
+  | 'manifest_missing_local'
+  | 'local_outside_manifest'
+  | 'missing_in_provider';
+
+export interface WorkspaceAgentSkill {
+  name: string;
+  type: 'skill' | 'prompt' | 'subagent' | null;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  status: WorkspaceAgentSkillStatus;
+  inManifest: boolean;
+  installedLocally: boolean;
+  existsInProvider: boolean;
+  localPaths: string[];
+}
+
+export interface WorkspaceAgentInventory {
+  target: DeployTarget;
+  label: string;
+  source: 'workspace-local' | 'config-override' | 'tool-default';
+  rootPath: string;
+  skillPath: string;
+  exists: boolean;
+  counts: Record<WorkspaceAgentSkillStatus, number> & { total: number };
+  skills: WorkspaceAgentSkill[];
 }
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,16 @@
 import path from 'node:path';
 
 import type {
+  CloudSkillCatalogItem,
+  CloudSkillInstallState,
   ContentType,
   DeployTarget,
+  DeployTargetDirectory,
   DetectedLocalSkill,
   SkillsCatalog,
+  WorkspaceAgentInventory,
+  WorkspaceAgentSkill,
+  WorkspaceAgentSkillStatus,
   WorkspaceCatalogEntry,
   WorkspaceCatalogSkill,
   WorkspaceManifest,
@@ -30,6 +36,25 @@ interface BuildWorkspaceCatalogParams {
   isActive: boolean;
   manifest: WorkspaceManifest | null;
   loadError?: string;
+  providerIndex?: Map<string, ProviderSkillIndexEntry>;
+}
+
+interface BuildCloudSkillsCatalogParams {
+  provider: StorageProvider;
+  loadManifest: (filePath: string) => Promise<WorkspaceManifest>;
+  workspaceFilePath?: string;
+  target?: DeployTarget;
+  query?: string;
+  type?: ContentType;
+  category?: string;
+  tag?: string;
+  installState?: CloudSkillInstallState;
+}
+
+interface BuildWorkspaceAgentInventoriesParams {
+  workspaceDir: string;
+  manifest: WorkspaceManifest | null;
+  targetDirectories: DeployTargetDirectory[];
   providerIndex?: Map<string, ProviderSkillIndexEntry>;
 }
 
@@ -114,17 +139,18 @@ export async function buildWorkspaceCatalogEntry(
 
   if (!manifest) {
     const workspaceName = lastPathSegment(workspaceDir);
+    const localSkillCount = uniqueLocalSkillNames(detectedLocalSkills).size;
     return {
       filePath,
       workspaceDir,
       workspaceName,
       isActive,
       configuredSkillCount: 0,
-      detectedSkillCount: uniqueLocalSkillNames(detectedLocalSkills).size,
+      detectedSkillCount: localSkillCount,
       configuredOnlyCount: 0,
-      detectedOnlyCount: uniqueLocalSkillNames(detectedLocalSkills).size,
+      detectedOnlyCount: localSkillCount,
       missingInProviderCount: 0,
-      driftCount: uniqueLocalSkillNames(detectedLocalSkills).size,
+      driftCount: localSkillCount,
       detectedLocalSkills,
       skills: [],
       error: loadError ?? 'Workspace manifest could not be loaded.',
@@ -154,12 +180,6 @@ export async function buildWorkspaceCatalogEntry(
       const detectedLocally = detectedEntries.length > 0;
       const existsInProvider = Boolean(providerSkill);
 
-      const status = resolveWorkspaceSkillStatus({
-        configured,
-        detectedLocally,
-        existsInProvider,
-      });
-
       return {
         name,
         type: providerSkill?.type ?? null,
@@ -171,7 +191,7 @@ export async function buildWorkspaceCatalogEntry(
         configured,
         detectedLocally,
         existsInProvider,
-        status,
+        status: resolveWorkspaceSkillStatus({ configured, detectedLocally, existsInProvider }),
         detectedTools: [...new Set(detectedEntries.map((entry) => entry.tool))].sort(),
       } satisfies WorkspaceCatalogSkill;
     });
@@ -196,68 +216,154 @@ export async function buildWorkspaceCatalogEntry(
   };
 }
 
-export async function buildSkillsCatalog(
-  registry: { active?: string; paths: string[] },
-  provider: StorageProvider,
-  loadManifest: (filePath: string) => Promise<WorkspaceManifest>,
+export async function buildCloudSkillsCatalog(
+  params: BuildCloudSkillsCatalogParams,
 ): Promise<SkillsCatalog> {
+  const {
+    provider,
+    loadManifest,
+    workspaceFilePath,
+    target,
+    query,
+    type,
+    category,
+    tag,
+    installState,
+  } = params;
   const providerIndex = await loadProviderSkillIndex(provider);
-  const workspaces: WorkspaceCatalogEntry[] = [];
-  const invalidWorkspaces: SkillsCatalog['invalidWorkspaces'] = [];
-  const configuredNames = new Set<string>();
+  const allSkills = [...providerIndex.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  for (const filePath of registry.paths) {
-    try {
-      const manifest = await loadManifest(filePath);
-      const entry = await buildWorkspaceCatalogEntry({
-        filePath,
-        isActive: filePath === registry.active,
-        manifest,
-        providerIndex,
-      });
+  let workspaceName: string | null = null;
+  let workspaceDir: string | null = null;
+  let installedNames: Set<string> | null = null;
 
-      entry.skills
-        .filter((skill) => skill.configured)
-        .forEach((skill) => configuredNames.add(skill.name));
+  if (workspaceFilePath) {
+    workspaceDir = path.dirname(workspaceFilePath);
+    const manifest = await loadManifest(workspaceFilePath);
+    workspaceName = manifest.name?.trim() || lastPathSegment(workspaceDir);
 
-      workspaces.push(entry);
-    } catch (err) {
-      const loadError = err instanceof Error ? err.message : String(err);
-      const entry = await buildWorkspaceCatalogEntry({
-        filePath,
-        isActive: filePath === registry.active,
-        manifest: null,
-        loadError,
-      });
-
-      invalidWorkspaces.push({
-        filePath,
-        workspaceDir: entry.workspaceDir,
-        workspaceName: entry.workspaceName,
-        error: loadError,
-        detectedSkillCount: entry.detectedSkillCount,
-      });
+    if (target) {
+      installedNames = await detectInstalledSkillNames(workspaceDir, target);
     }
   }
 
-  const unassigned = [...providerIndex.values()]
-    .filter((skill) => !configuredNames.has(skill.name))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((skill) => ({
-      name: skill.name,
-      type: skill.type,
-      description: skill.description,
-      category: skill.category,
-      tags: skill.tags,
-      fileCount: skill.fileCount,
-    }));
+  const availableFilters = {
+    types: [...new Set(allSkills.map((skill) => skill.type))].sort(),
+    categories: [...new Set(allSkills.map((skill) => skill.category).filter(Boolean))].sort() as string[],
+    tags: [...new Set(allSkills.flatMap((skill) => skill.tags))].sort(),
+    installStates: ['installed', 'not_installed', 'unknown'] as CloudSkillInstallState[],
+  };
+
+  const normalizedQuery = query?.trim().toLowerCase() ?? '';
+  const normalizedTag = tag?.trim().toLowerCase() ?? '';
+  const normalizedCategory = category?.trim().toLowerCase() ?? '';
+
+  const filteredItems = allSkills
+    .map((skill) => buildCloudSkillCatalogItem(skill, installedNames))
+    .filter((skill) => {
+      if (normalizedQuery && !matchesCatalogQuery(skill, normalizedQuery)) {
+        return false;
+      }
+      if (type && skill.type !== type) {
+        return false;
+      }
+      if (normalizedCategory && (skill.category ?? '').toLowerCase() !== normalizedCategory) {
+        return false;
+      }
+      if (normalizedTag && !skill.tags.some((entry) => entry.toLowerCase() === normalizedTag)) {
+        return false;
+      }
+      return true;
+    });
+
+  const counts = {
+    installed: filteredItems.filter((skill) => skill.installState === 'installed').length,
+    not_installed: filteredItems.filter((skill) => skill.installState === 'not_installed').length,
+    unknown: filteredItems.filter((skill) => skill.installState === 'unknown').length,
+  } satisfies Record<CloudSkillInstallState, number>;
+
+  const items = installState
+    ? filteredItems.filter((skill) => skill.installState === installState)
+    : filteredItems;
 
   return {
-    providerSkillCount: providerIndex.size,
-    workspaces,
-    unassigned,
-    invalidWorkspaces,
+    total: items.length,
+    items,
+    availableFilters,
+    destinationScope: {
+      workspaceFilePath: workspaceFilePath ?? null,
+      workspaceName,
+      workspaceDir,
+      target: target ?? null,
+      ready: Boolean(workspaceFilePath && target),
+    },
+    counts,
   };
+}
+
+export async function buildWorkspaceAgentInventories(
+  params: BuildWorkspaceAgentInventoriesParams,
+): Promise<WorkspaceAgentInventory[]> {
+  const { workspaceDir, manifest, targetDirectories, providerIndex } = params;
+  const resolved = manifest ? resolveManifestSkills(manifest) : [];
+  const detectedLocalSkills = dedupeDetectedLocalSkills(await detectLocalSkills(workspaceDir));
+
+  return targetDirectories.map((targetDirectory) => {
+    const configuredNames = new Set(
+      resolved
+        .filter((skill) => skill.targets.includes(targetDirectory.target))
+        .map((skill) => skill.name),
+    );
+    const detectedForTarget = detectedLocalSkills.filter((skill) => skill.target === targetDirectory.target);
+    const detectedByName = groupDetectedLocalSkills(detectedForTarget);
+    const skillNames = new Set<string>([
+      ...configuredNames,
+      ...detectedByName.keys(),
+    ]);
+
+    const skills = [...skillNames]
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => {
+        const localEntries = detectedByName.get(name) ?? [];
+        const inManifest = configuredNames.has(name);
+        const installedLocally = localEntries.length > 0;
+        const providerSkill = providerIndex?.get(name) ?? null;
+        const existsInProvider = Boolean(providerSkill);
+
+        return {
+          name,
+          type: providerSkill?.type ?? null,
+          description: providerSkill?.description ?? null,
+          category: providerSkill?.category ?? null,
+          tags: providerSkill?.tags ?? [],
+          fileCount: providerSkill?.fileCount ?? 0,
+          status: resolveWorkspaceAgentSkillStatus({ inManifest, installedLocally, existsInProvider }),
+          inManifest,
+          installedLocally,
+          existsInProvider,
+          localPaths: localEntries.map((entry) => entry.absolutePath).sort(),
+        } satisfies WorkspaceAgentSkill;
+      });
+
+    const counts = {
+      total: skills.length,
+      manifest_and_installed: skills.filter((skill) => skill.status === 'manifest_and_installed').length,
+      manifest_missing_local: skills.filter((skill) => skill.status === 'manifest_missing_local').length,
+      local_outside_manifest: skills.filter((skill) => skill.status === 'local_outside_manifest').length,
+      missing_in_provider: skills.filter((skill) => skill.status === 'missing_in_provider').length,
+    };
+
+    return {
+      target: targetDirectory.target,
+      label: targetDirectory.label,
+      source: targetDirectory.source,
+      rootPath: targetDirectory.rootPath,
+      skillPath: targetDirectory.directories.skill,
+      exists: targetDirectory.exists,
+      counts,
+      skills,
+    } satisfies WorkspaceAgentInventory;
+  });
 }
 
 export async function buildAdoptedManifestSkills(
@@ -278,14 +384,10 @@ export async function buildAdoptedManifestSkills(
     const targets = [...new Set(
       detectedEntries
         .map((entry) => entry.target)
-        .filter((target): target is DeployTarget => Boolean(target)),
+        .filter((candidate): candidate is DeployTarget => Boolean(candidate)),
     )].sort();
 
-    skills.push(
-      targets.length > 0
-        ? { name, targets }
-        : { name },
-    );
+    skills.push(targets.length > 0 ? { name, targets } : { name });
   }
 
   return {
@@ -294,6 +396,35 @@ export async function buildAdoptedManifestSkills(
     adoptedSkillCount: skills.length,
     ignoredSkillNames,
   };
+}
+
+function buildCloudSkillCatalogItem(
+  skill: ProviderSkillIndexEntry,
+  installedNames: Set<string> | null,
+): CloudSkillCatalogItem {
+  return {
+    name: skill.name,
+    type: skill.type,
+    description: skill.description,
+    category: skill.category,
+    tags: skill.tags,
+    fileCount: skill.fileCount,
+    installState: installedNames
+      ? (installedNames.has(skill.name) ? 'installed' : 'not_installed')
+      : 'unknown',
+  };
+}
+
+async function detectInstalledSkillNames(
+  workspaceDir: string,
+  target: DeployTarget,
+): Promise<Set<string>> {
+  const localSkills = await detectLocalSkills(workspaceDir);
+  return new Set(
+    localSkills
+      .filter((skill) => skill.target === target)
+      .map((skill) => skill.name),
+  );
 }
 
 function resolveWorkspaceSkillStatus(params: {
@@ -313,6 +444,46 @@ function resolveWorkspaceSkillStatus(params: {
     return 'configured_only';
   }
   return 'detected_only';
+}
+
+function resolveWorkspaceAgentSkillStatus(params: {
+  inManifest: boolean;
+  installedLocally: boolean;
+  existsInProvider: boolean;
+}): WorkspaceAgentSkillStatus {
+  const { inManifest, installedLocally, existsInProvider } = params;
+
+  if (inManifest && !existsInProvider) {
+    return 'missing_in_provider';
+  }
+  if (inManifest && installedLocally) {
+    return 'manifest_and_installed';
+  }
+  if (inManifest) {
+    return 'manifest_missing_local';
+  }
+  return 'local_outside_manifest';
+}
+
+function matchesCatalogQuery(
+  skill: {
+    name: string;
+    description?: string | null;
+    category?: string | null;
+    tags?: string[];
+  },
+  query: string,
+): boolean {
+  const haystack = [
+    skill.name,
+    skill.description ?? '',
+    skill.category ?? '',
+    ...(skill.tags ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(query);
 }
 
 function dedupeDetectedLocalSkills(entries: DetectedLocalSkill[]): DetectedLocalSkill[] {

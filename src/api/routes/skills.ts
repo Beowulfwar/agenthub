@@ -8,15 +8,16 @@
  */
 
 import { Hono } from 'hono';
-import { getWorkspaceRegistry, requireConfig } from '../../core/config.js';
+import { requireConfig } from '../../core/config.js';
 import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { serializeSkill, validateSkill, extractSkillExtensions, getMarkerFile } from '../../core/skill.js';
 import { assertSafeSkillName } from '../../core/sanitize.js';
-import { getSkillStats, formatBytes } from '../../core/stats.js';
-import { buildSkillsCatalog } from '../../core/workspace-catalog.js';
+import { getSkillStats } from '../../core/stats.js';
+import { buildCloudSkillsCatalog } from '../../core/workspace-catalog.js';
 import { loadWorkspaceManifest } from '../../core/workspace.js';
+import { normalizeExternalPath } from '../../core/wsl.js';
 import type { StorageProvider } from '../../storage/provider.js';
-import type { AhubConfig, ContentType } from '../../core/types.js';
+import type { AhubConfig, ContentType, DeployTarget } from '../../core/types.js';
 
 /** Get a provider, optionally scoped to a specific source. */
 function getProviderForSource(config: AhubConfig, sourceId?: string): StorageProvider {
@@ -32,30 +33,28 @@ function getProviderForSource(config: AhubConfig, sourceId?: string): StoragePro
 export function skillsRoutes(): Hono {
   const app = new Hono();
 
-  // GET /api/skills/catalog?q=<search>
+  // GET /api/skills/catalog?q=<search>&workspaceFilePath=&target=
   app.get('/catalog', async (c) => {
     const config = await requireConfig();
     const provider = createProvider(config);
-    const registry = await getWorkspaceRegistry();
-    const catalog = await buildSkillsCatalog(registry, provider, loadWorkspaceManifest);
-    const query = c.req.query('q')?.trim().toLowerCase();
-
-    if (!query) {
-      return c.json({ data: catalog });
-    }
-
-    return c.json({
-      data: {
-        ...catalog,
-        workspaces: catalog.workspaces
-          .map((workspace) => ({
-            ...workspace,
-            skills: workspace.skills.filter((skill) => matchesCatalogQuery(skill, query)),
-          }))
-          .filter((workspace) => workspace.skills.length > 0),
-        unassigned: catalog.unassigned.filter((skill) => matchesCatalogQuery(skill, query)),
-      },
+    const workspaceFilePath = c.req.query('workspaceFilePath');
+    const targetParam = c.req.query('target');
+    const target = isDeployTarget(targetParam) ? targetParam : undefined;
+    const catalog = await buildCloudSkillsCatalog({
+      provider,
+      loadManifest: loadWorkspaceManifest,
+      ...(workspaceFilePath
+        ? { workspaceFilePath: await normalizeExternalPath(workspaceFilePath) }
+        : {}),
+      ...(target ? { target } : {}),
+      query: c.req.query('q') ?? undefined,
+      type: (c.req.query('type') as ContentType | undefined) ?? undefined,
+      category: c.req.query('category') ?? undefined,
+      tag: c.req.query('tag') ?? undefined,
+      installState: (c.req.query('installState') as 'installed' | 'not_installed' | 'unknown' | undefined) ?? undefined,
     });
+
+    return c.json({ data: catalog });
   });
 
   // GET /api/skills?q=<search>&source=<id>&type=<type>&detailed=true
@@ -297,23 +296,6 @@ export function skillsRoutes(): Hono {
   return app;
 }
 
-function matchesCatalogQuery(
-  skill: {
-    name: string;
-    description?: string | null;
-    category?: string | null;
-    tags?: string[];
-  },
-  query: string,
-): boolean {
-  const haystack = [
-    skill.name,
-    skill.description ?? '',
-    skill.category ?? '',
-    ...(skill.tags ?? []),
-  ]
-    .join(' ')
-    .toLowerCase();
-
-  return haystack.includes(query);
+function isDeployTarget(value?: string): value is DeployTarget {
+  return value === 'claude-code' || value === 'codex' || value === 'cursor';
 }

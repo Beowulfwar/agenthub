@@ -1,81 +1,81 @@
 # skills-catalog
 
-> Spec comportamental — catalogo unificado de skills exibido na tela `/skills`.
+> Spec comportamental — catalogo global de skills da nuvem exibido na tela `/skills`.
 
 ## Proposito
 
-Definir uma fonte unica e confiavel para a tela `/skills`. O catalogo deve unir inventario do provider, vinculacao por manifesto e observacao do filesystem local, deixando explicito o que esta configurado, o que foi detectado apenas no disco e onde existe drift por workspace.
+Definir `/skills` como a superficie principal de descoberta e instalacao de skills. A tela sempre parte do inventario unico do provider e usa `workspace + agente` apenas como contexto de destino e de estado de instalacao.
 
 ## Localizacao
 
-- **UI**: `ui/src/pages/SkillsPage.tsx`, `ui/src/components/skills/SearchBar.tsx`, `ui/src/components/deploy/DeployDialog.tsx`
-- **Hooks**: `ui/src/hooks/useSkills.ts`
-- **API consumida**: `src/api/routes/skills.ts`
-- **Core**: `src/core/workspace-catalog.ts`, `src/core/explorer.ts`
+- **UI**: `ui/src/pages/SkillsPage.tsx`, `ui/src/pages/SkillDetailPage.tsx`, `ui/src/components/deploy/DeployDialog.tsx`
+- **Hooks**: `ui/src/hooks/useSkills.ts`, `ui/src/hooks/useDeploy.ts`
+- **API consumida**: `src/api/routes/skills.ts`, `src/api/routes/deploy.ts`
+- **Core**: `src/core/workspace-catalog.ts`
 
 ## Invariantes
 
-1. A tela `/skills` usa `GET /api/skills/catalog` como fonte de verdade; ela nao reconstrui agrupamentos localmente a partir de heuristicas soltas.
-2. Cada secao de workspace mostra o estado combinado de cada skill em quatro situacoes: `Manifesto + local`, `So manifesto`, `So local` e `Fora do provider`.
-3. `skills configuradas` significam skills declaradas no manifesto do workspace.
-4. `skills detectadas localmente` significam skills encontradas em diretorios reconhecidos como `.skills`, `.codex/skills`, `.claude/skills` e equivalentes.
-5. Deteccao local nao cria vinculacao oficial com o workspace; o vinculo oficial continua sendo o manifesto.
-6. Skills presentes no provider e ausentes de todos os manifests aparecem em `Sem workspace`.
-7. Workspaces com erro de leitura de manifesto nao entram nas secoes normais e precisam gerar aviso explicito.
-8. A selecao para deploy continua sendo por nome de skill; quando uma skill aparece em mais de uma secao, a selecao reflete em todas as ocorrencias visiveis.
-9. Skills fora do provider nao podem ser tratadas como deployaveis, mesmo quando aparecem por deteccao local ou referencia no manifesto.
+1. A tela `/skills` usa `GET /api/skills/catalog` como fonte de verdade; ela nao reconstrui agrupamentos por workspace no frontend.
+2. Cada skill da nuvem aparece uma unica vez no catalogo, porque o provider e a autoridade global para nomes.
+3. Selecionar `workspace` e `agente` nao duplica itens; apenas resolve o `installState` de cada skill para aquele destino.
+4. Sem `workspace + agente`, o `installState` e `unknown`, os checkboxes ficam desabilitados e nao ha instalacao em lote.
+5. Os filtros globais da tela sao `texto`, `tipo`, `categoria` e `tag`.
+6. Os filtros de destino da tela sao `workspace`, `agente` e `estado no destino`.
+7. `POST /api/deploy` para a UI de skills sempre envia `workspaceFilePath` e `target` explicitos.
+8. Drift local, skills fora do manifesto e problemas de inventario local nao sao exibidos em `/skills`; esses estados pertencem a `/workspace`.
+9. A pagina `/skills/:name` continua representando a definicao global da skill; o CTA principal e instalar, nunca “atribuir automaticamente” a um workspace.
 
 ## Comportamentos (Given/When/Then)
 
-### Cenario: Exibir estado combinado por workspace
+### Cenario: Abrir o catalogo sem destino
 
-- **Given**: Existe um workspace registrado com manifesto valido e skills detectadas localmente
-- **When**: O usuario abre `/skills`
-- **Then**: A secao do workspace mostra contadores de `configuradas`, `detectadas localmente` e `drift`, alem do estado individual de cada skill
+- **Given**: Existem skills disponiveis no provider
+- **When**: O usuario abre `/skills` sem escolher `workspace` nem `agente`
+- **Then**: Cada skill aparece uma unica vez, a tela exibe apenas o catalogo global e a selecao em lote permanece desabilitada
 
-### Cenario: Skill so no manifesto
+### Cenario: Escolher destino explicito
 
-- **Given**: A skill `x` esta no manifesto, mas nao foi detectada nas pastas locais do workspace
-- **When**: O usuario abre `/skills`
-- **Then**: A skill aparece com status `So manifesto`
+- **Given**: O usuario escolheu um workspace e depois um agente
+- **When**: O catalogo e recarregado
+- **Then**: Cada card passa a mostrar `Instalada` ou `Nao instalada` apenas para aquele destino
 
-### Cenario: Skill so local
+### Cenario: Trocar workspace
 
-- **Given**: A skill `y` foi encontrada em `.skills` ou `.codex/skills`, mas nao esta no manifesto
-- **When**: O usuario abre `/skills`
-- **Then**: A skill aparece com status `So local`, caracterizando drift
+- **Given**: O usuario ja havia escolhido skills e um agente
+- **When**: Troca o workspace no seletor de destino
+- **Then**: O agente e a selecao atual sao limpos antes de continuar
 
-### Cenario: Skill referenciada e ausente do provider
+### Cenario: Filtrar por estado no destino
 
-- **Given**: O manifesto referencia `skill-antiga`, mas ela nao existe mais no provider
-- **When**: O usuario abre `/skills`
-- **Then**: A skill aparece com status `Fora do provider` e nao deve ser tratada como deployavel
+- **Given**: Existe um destino selecionado com algumas skills instaladas e outras nao
+- **When**: O usuario escolhe o filtro `Instalada`
+- **Then**: A lista mostra apenas as skills presentes naquele `workspace + agente`, mas as contagens de estado continuam refletindo o resultado base do destino
 
-### Cenario: Filtrar por workspace
+### Cenario: Instalar varias skills
 
-- **Given**: Existem skills distribuidas entre varios workspaces
-- **When**: O usuario escolhe um workspace especifico no filtro da tela
-- **Then**: Apenas a secao desse workspace permanece visivel, preservando os estados de drift
+- **Given**: O usuario escolheu `workspace + agente` e marcou varias skills
+- **When**: Confirma a instalacao
+- **Then**: O dialogo envia um lote unico para `POST /api/deploy` com `skills[]`, `workspaceFilePath` e `target`
 
-### Cenario: Workspace com manifesto invalido
+### Cenario: Abrir detalhe global de uma skill
 
-- **Given**: Um workspace registrado nao pode ter o manifesto carregado
-- **When**: O usuario abre `/skills`
-- **Then**: A tela exibe um aviso separado com o erro e a quantidade de skills locais detectadas nesse workspace
+- **Given**: O usuario abre `/skills/fiscal-nfe`
+- **When**: Clica em `Instalar`
+- **Then**: O dialogo solicita ou reutiliza um destino explicito antes do deploy
 
 ## Decisoes de Design
 
 | Decisao | Motivo |
 |---------|--------|
-| Catalogo unificado no backend | Evita que cada tela invente sua propria regra de reconhecimento de skill |
-| Manifesto como verdade do vinculo | Mantem a relacao skill-workspace deterministica e editavel |
-| Filesystem local como estado observado | Permite detectar drift sem transformar artefatos sincronizados em fonte canonica |
-| Secao `Sem workspace` apenas para skills do provider | Evita esconder inventario ainda nao associado a projetos |
-| Status explicitos por skill | Reduz ambiguidade sobre o que esta configurado, sincronizado ou faltando |
+| Catalogo cloud-first | Mantem nomes unicos e elimina repeticao artificial por workspace |
+| Destino separado do inventario | Permite comparar “catalogo global” e “estado local” sem misturar conceitos |
+| Instalacao em lote para um unico destino por vez | Reduz ambiguidade operacional e facilita feedback de sucesso/falha |
+| Filtros globais independentes do workspace | A busca principal e sobre o catalogo da nuvem, nao sobre o disco local |
+| Pagina de detalhe continua global | A skill deve ter uma unica definicao central, independentemente de quantos workspaces a usem |
 
 ## Changelog
 
 | Data | Mudanca |
 |------|---------|
 | 2026-03-06 | Spec criada para documentar o agrupamento de skills por workspace na tela `/skills` |
-| 2026-03-06 | Atualizada para refletir o catalogo unificado provider + manifests + deteccao local, com estados de drift por skill e contadores separados de configuracao vs deteccao |
+| 2026-03-07 | Reescrita para o modelo cloud-first com itens unicos, destino explicito `workspace + agente` e instalacao em lote |

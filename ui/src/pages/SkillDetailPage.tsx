@@ -1,22 +1,20 @@
-import { useState, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useCallback, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  Rocket,
-  Trash2,
-  FileText,
-  Folder,
-  FolderKanban,
-  Pencil,
   ClipboardCopy,
   Copy,
+  FileText,
+  Folder,
   PenLine,
+  Pencil,
+  Rocket,
+  Trash2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
-import { useSkill, useDeleteSkill, usePatchSkill } from '../hooks/useSkills';
-import { useWorkspaceRegistry } from '../hooks/useWorkspace';
+import { useDeleteSkill, usePatchSkill, useSkill } from '../hooks/useSkills';
 import { DeployDialog } from '../components/deploy/DeployDialog';
 import { EditSkillForm } from '../components/skills/EditSkillForm';
 import { CloneDialog } from '../components/skills/CloneDialog';
@@ -30,23 +28,6 @@ export function SkillDetailPage() {
   const { data: pkg, isLoading, error } = useSkill(name ?? '');
   const deleteMutation = useDeleteSkill();
   const patchMutation = usePatchSkill();
-  const workspaceRegistry = useWorkspaceRegistry();
-
-  const belongsToWorkspaces = useMemo(() => {
-    if (!name || !workspaceRegistry.data) return [];
-    return workspaceRegistry.data
-      .filter((entry) => {
-        if (!entry.manifest) return false;
-        const names = new Set<string>();
-        entry.manifest.groups?.forEach((g) => g.skills.forEach((s) => names.add(s)));
-        entry.manifest.skills?.forEach((s) => names.add(s.name));
-        return names.has(name);
-      })
-      .map((entry) => ({
-        name: entry.manifest?.name?.trim() || entry.workspaceDir.split('/').pop() || entry.workspaceDir,
-        isActive: entry.isActive,
-      }));
-  }, [name, workspaceRegistry.data]);
 
   const [showDeploy, setShowDeploy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -55,14 +36,14 @@ export function SkillDetailPage() {
 
   const handleDelete = () => {
     if (!name) return;
-    if (!confirm(`Delete skill "${name}"? This cannot be undone.`)) return;
+    if (!confirm(`Remover a skill "${name}"? Esta acao nao pode ser desfeita.`)) return;
     deleteMutation.mutate(name, {
       onSuccess: () => {
-        toast.success(`Deleted "${name}"`);
+        toast.success(`"${name}" removida`);
         navigate('/skills');
       },
       onError: (err) => {
-        toast.error(err instanceof Error ? err.message : 'Delete failed');
+        toast.error(err instanceof Error ? err.message : 'Falha ao remover a skill');
       },
     });
   };
@@ -70,7 +51,7 @@ export function SkillDetailPage() {
   const handleCopyBody = useCallback(() => {
     if (!pkg?.skill.body) return;
     navigator.clipboard.writeText(pkg.skill.body).then(() => {
-      toast.success('Body copied to clipboard');
+      toast.success('Conteudo copiado para a area de transferencia');
     });
   }, [pkg?.skill.body]);
 
@@ -81,11 +62,11 @@ export function SkillDetailPage() {
         { name, patch },
         {
           onSuccess: () => {
-            toast.success('Skill saved');
+            toast.success('Skill salva');
             setIsEditing(false);
           },
           onError: (err) => {
-            toast.error(err instanceof Error ? err.message : 'Save failed');
+            toast.error(err instanceof Error ? err.message : 'Falha ao salvar a skill');
           },
         },
       );
@@ -104,119 +85,102 @@ export function SkillDetailPage() {
   };
 
   if (isLoading) {
-    return <LoadingSpinner className="py-24" size="lg" label="Loading skill..." />;
+    return <LoadingSpinner className="py-24" size="lg" label="Carregando skill..." />;
   }
 
   if (error || !pkg) {
     return (
       <div className="mx-auto max-w-3xl">
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          {error instanceof Error ? error.message : 'Skill not found'}
+          {error instanceof Error ? error.message : 'Skill nao encontrada'}
         </div>
       </div>
     );
   }
 
   const { skill, files } = pkg;
+  const skillDescription =
+    typeof skill.metadata.description === 'string' ? skill.metadata.description : undefined;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      {/* Navigation */}
+    <div className="mx-auto max-w-4xl space-y-6">
       <button
         onClick={() => navigate('/skills')}
         className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to skills
+        <ArrowLeft className="h-4 w-4" />
+        Voltar para o catalogo
       </button>
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">{skill.name}</h2>
-          {!isEditing && skill.metadata.description && (
-            <p className="mt-1 text-sm text-gray-500">
-              {skill.metadata.description as string}
-            </p>
-          )}
-          {belongsToWorkspaces.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {belongsToWorkspaces.map((ws) => (
-                <span
-                  key={ws.name}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                    ws.isActive ? 'bg-brand-50 text-brand-700' : 'bg-blue-50 text-blue-700',
-                  )}
-                >
-                  <FolderKanban className="h-3 w-3" />
-                  {ws.name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {/* Copy body */}
-          <button
-            onClick={handleCopyBody}
-            title="Copy body to clipboard"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-          >
-            <ClipboardCopy className="h-3.5 w-3.5" />
-          </button>
-
-          {/* Edit toggle */}
-          <button
-            onClick={() => setIsEditing(!isEditing)}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium',
-              isEditing
-                ? 'border-brand-300 bg-brand-50 text-brand-700'
-                : 'border-gray-300 text-gray-600 hover:bg-gray-50',
+      <div className="rounded-2xl border border-gray-200 bg-white p-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold text-gray-900">{skill.name}</h1>
+            {skillDescription && (
+              <p className="mt-2 text-sm text-gray-500">{skillDescription}</p>
             )}
-          >
-            <Pencil className="h-3.5 w-3.5" /> {isEditing ? 'Editing' : 'Edit'}
-          </button>
+            <p className="mt-3 text-sm text-gray-500">
+              Esta e a definicao global da skill na nuvem. A instalacao sempre exige um destino
+              explicito: primeiro workspace, depois agente.
+            </p>
+          </div>
 
-          {/* Clone */}
-          <button
-            onClick={() => setShowClone(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-          >
-            <Copy className="h-3.5 w-3.5" /> Clone
-          </button>
-
-          {/* Rename */}
-          <button
-            onClick={() => setShowRename(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-          >
-            <PenLine className="h-3.5 w-3.5" /> Rename
-          </button>
-
-          {/* Deploy */}
-          <button
-            onClick={() => setShowDeploy(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            <Rocket className="h-3.5 w-3.5" /> Deploy
-          </button>
-
-          {/* Delete */}
-          <button
-            onClick={handleDelete}
-            disabled={deleteMutation.isPending}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Delete
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleCopyBody}
+              title="Copiar conteudo"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
+              Copiar
+            </button>
+            <button
+              onClick={() => setIsEditing(!isEditing)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium',
+                isEditing
+                  ? 'border-brand-300 bg-brand-50 text-brand-700'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-50',
+              )}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              {isEditing ? 'Editando' : 'Editar'}
+            </button>
+            <button
+              onClick={() => setShowClone(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Clonar
+            </button>
+            <button
+              onClick={() => setShowRename(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              <PenLine className="h-3.5 w-3.5" />
+              Renomear
+            </button>
+            <button
+              onClick={() => setShowDeploy(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              <Rocket className="h-3.5 w-3.5" />
+              Instalar
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Remover
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Stats bar */}
       {name && <SkillInfoPanel name={name} />}
 
-      {/* Edit mode vs View mode */}
       {isEditing ? (
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <EditSkillForm
@@ -228,11 +192,10 @@ export function SkillDetailPage() {
         </div>
       ) : (
         <>
-          {/* Metadata */}
           {Object.keys(skill.metadata).length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-white p-4">
               <h3 className="text-sm font-semibold text-gray-700">Metadata</h3>
-              <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                 {Object.entries(skill.metadata).map(([key, value]) => (
                   <div key={key}>
                     <dt className="text-gray-400">{key}</dt>
@@ -245,21 +208,21 @@ export function SkillDetailPage() {
             </div>
           )}
 
-          {/* Body (Markdown) */}
           <div className="rounded-xl border border-gray-200 bg-white p-5">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
-              <FileText className="h-4 w-4" /> Content
+              <FileText className="h-4 w-4" />
+              Conteudo
             </h3>
             <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-600 prose-code:text-brand-700 prose-code:before:content-none prose-code:after:content-none">
               <ReactMarkdown>{skill.body}</ReactMarkdown>
             </div>
           </div>
 
-          {/* Files */}
           {files.length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-white p-5">
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <Folder className="h-4 w-4" /> Files ({files.length})
+                <Folder className="h-4 w-4" />
+                Arquivos ({files.length})
               </h3>
               <div className="space-y-2">
                 {files.map((file) => (
@@ -278,7 +241,6 @@ export function SkillDetailPage() {
         </>
       )}
 
-      {/* Dialogs */}
       {showDeploy && name && (
         <DeployDialog skillNames={[name]} onClose={() => setShowDeploy(false)} />
       )}

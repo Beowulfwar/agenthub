@@ -7,6 +7,8 @@ import type {
   HealthData,
   SkillSummary,
   SkillsCatalog,
+  CloudSkillInstallState,
+  DeployTarget,
   SkillPackage,
   SkillInfo,
   PatchSkillRequest,
@@ -62,8 +64,23 @@ export async function fetchSkillsDetailed(query?: string): Promise<SkillSummary[
   return unwrap(await api.get<ApiSuccess<SkillSummary[]>>('/skills', { params }));
 }
 
-export async function fetchSkillsCatalog(query?: string): Promise<SkillsCatalog> {
-  const params = query ? { q: query } : {};
+export async function fetchSkillsCatalog(filters?: {
+  q?: string;
+  workspaceFilePath?: string;
+  target?: DeployTarget;
+  type?: 'skill' | 'prompt' | 'subagent';
+  category?: string;
+  tag?: string;
+  installState?: CloudSkillInstallState;
+}): Promise<SkillsCatalog> {
+  const params: Record<string, string> = {};
+  if (filters?.q) params.q = filters.q;
+  if (filters?.workspaceFilePath) params.workspaceFilePath = filters.workspaceFilePath;
+  if (filters?.target) params.target = filters.target;
+  if (filters?.type) params.type = filters.type;
+  if (filters?.category) params.category = filters.category;
+  if (filters?.tag) params.tag = filters.tag;
+  if (filters?.installState) params.installState = filters.installState;
   return unwrap(await api.get<ApiSuccess<SkillsCatalog>>('/skills/catalog', { params }));
 }
 
@@ -115,6 +132,7 @@ export async function fetchWorkspace(path?: string): Promise<WorkspaceData> {
   return {
     ...data,
     workspaceDir: data.workspaceDir ?? (data.filePath ? dirname(data.filePath) : null),
+    agents: data.agents ?? [],
   };
 }
 

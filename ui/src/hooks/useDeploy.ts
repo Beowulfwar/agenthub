@@ -8,6 +8,8 @@ export function useDeploy() {
     mutationFn: (req: DeployRequest) => deploy(req),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['skills'] });
+      qc.invalidateQueries({ queryKey: ['workspace'] });
+      qc.invalidateQueries({ queryKey: ['workspace-registry'] });
     },
   });
 }
