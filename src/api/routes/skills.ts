@@ -8,11 +8,20 @@
  */
 
 import { Hono } from 'hono';
-import { requireConfig } from '../../core/config.js';
+import { getWorkspaceRegistry, requireConfig } from '../../core/config.js';
 import { createProvider, createProviderFromSource } from '../../storage/factory.js';
 import { serializeSkill, validateSkill, extractSkillExtensions, getMarkerFile } from '../../core/skill.js';
 import { assertSafeSkillName } from '../../core/sanitize.js';
 import { getSkillStats } from '../../core/stats.js';
+import {
+  buildSkillsHubDiff,
+  buildSkillsHubShell,
+  buildSkillsHubWorkspaceDetail,
+  performSkillsHubDownload,
+  performSkillsHubTransfer,
+  performSkillsHubUpload,
+} from '../../core/skills-hub.js';
+import { loadProviderSkillIndex } from '../../core/workspace-catalog.js';
 import { buildCloudSkillsCatalog } from '../../core/workspace-catalog.js';
 import { loadWorkspaceManifest } from '../../core/workspace.js';
 import { normalizeExternalPath } from '../../core/wsl.js';
@@ -55,6 +64,176 @@ export function skillsRoutes(): Hono {
     });
 
     return c.json({ data: catalog });
+  });
+
+  app.get('/hub', async (c) => {
+    const config = await requireConfig();
+    const provider = createProvider(config);
+    const registry = await getWorkspaceRegistry();
+    const shell = await buildSkillsHubShell({
+      config,
+      provider,
+      registry,
+      query: c.req.query('q') ?? undefined,
+      type: (c.req.query('type') as ContentType | undefined) ?? undefined,
+      category: c.req.query('category') ?? undefined,
+      tag: c.req.query('tag') ?? undefined,
+    });
+
+    return c.json({ data: shell });
+  });
+
+  app.get('/hub/workspace', async (c) => {
+    const filePathParam = c.req.query('filePath');
+    if (!filePathParam) {
+      return c.json(
+        { error: { code: 'VALIDATION_ERROR', message: 'filePath e obrigatorio.' } },
+        400,
+      );
+    }
+
+    const config = await requireConfig();
+    const provider = createProvider(config);
+    const filePath = await normalizeExternalPath(filePathParam);
+    const registry = await getWorkspaceRegistry();
+    const detail = await buildSkillsHubWorkspaceDetail({
+      config,
+      filePath,
+      isActive: registry.active === filePath,
+      providerIndex: await loadProviderSkillIndex(provider),
+      packageLoader: {
+        get: async (name: string) => provider.get(name).catch(() => null),
+      },
+    });
+
+    return c.json({ data: detail });
+  });
+
+  app.get('/hub/diff', async (c) => {
+    const filePathParam = c.req.query('filePath');
+    const name = c.req.query('name');
+    const targetParam = c.req.query('target');
+
+    if (!filePathParam || !name || !isDeployTarget(targetParam)) {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'filePath, name e target valido sao obrigatorios.',
+          },
+        },
+        400,
+      );
+    }
+
+    const config = await requireConfig();
+    const provider = createProvider(config);
+    const diff = await buildSkillsHubDiff({
+      provider,
+      filePath: await normalizeExternalPath(filePathParam),
+      target: targetParam,
+      name,
+    });
+
+    return c.json({ data: diff });
+  });
+
+  app.post('/hub/actions/download', async (c) => {
+    const body = await c.req.json<{
+      filePath: string;
+      target: DeployTarget;
+      skills: string[];
+    }>();
+
+    if (!body.filePath || !isDeployTarget(body.target) || !Array.isArray(body.skills) || body.skills.length === 0) {
+      return c.json(
+        { error: { code: 'VALIDATION_ERROR', message: 'filePath, target e skills[] sao obrigatorios.' } },
+        400,
+      );
+    }
+
+    const config = await requireConfig();
+    const provider = createProvider(config);
+    const result = await performSkillsHubDownload({
+      config,
+      provider,
+      filePath: await normalizeExternalPath(body.filePath),
+      target: body.target,
+      skills: body.skills,
+    });
+
+    return c.json({ data: result });
+  });
+
+  app.post('/hub/actions/upload', async (c) => {
+    const body = await c.req.json<{
+      filePath: string;
+      target: DeployTarget;
+      skills: string[];
+      force?: boolean;
+    }>();
+
+    if (!body.filePath || !isDeployTarget(body.target) || !Array.isArray(body.skills) || body.skills.length === 0) {
+      return c.json(
+        { error: { code: 'VALIDATION_ERROR', message: 'filePath, target e skills[] sao obrigatorios.' } },
+        400,
+      );
+    }
+
+    const provider = createProvider(await requireConfig());
+    const result = await performSkillsHubUpload({
+      provider,
+      filePath: await normalizeExternalPath(body.filePath),
+      target: body.target,
+      skills: body.skills,
+      force: body.force,
+    });
+
+    return c.json({ data: result });
+  });
+
+  app.post('/hub/actions/transfer', async (c) => {
+    const body = await c.req.json<{
+      sourceWorkspaceFilePath: string;
+      sourceTarget: DeployTarget;
+      destinationWorkspaceFilePath: string;
+      destinationTarget: DeployTarget;
+      skills: string[];
+      mode: 'copy' | 'move';
+    }>();
+
+    if (
+      !body.sourceWorkspaceFilePath
+      || !body.destinationWorkspaceFilePath
+      || !isDeployTarget(body.sourceTarget)
+      || !isDeployTarget(body.destinationTarget)
+      || !Array.isArray(body.skills)
+      || body.skills.length === 0
+      || (body.mode !== 'copy' && body.mode !== 'move')
+    ) {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Origem, destino, targets, mode e skills[] sao obrigatorios.',
+          },
+        },
+        400,
+      );
+    }
+
+    const config = await requireConfig();
+    const result = await performSkillsHubTransfer({
+      config,
+      sourceWorkspaceFilePath: await normalizeExternalPath(body.sourceWorkspaceFilePath),
+      sourceTarget: body.sourceTarget,
+      destinationWorkspaceFilePath: await normalizeExternalPath(body.destinationWorkspaceFilePath),
+      destinationTarget: body.destinationTarget,
+      skills: body.skills,
+      mode: body.mode,
+    });
+
+    return c.json({ data: result });
   });
 
   // GET /api/skills?q=<search>&source=<id>&type=<type>&detailed=true

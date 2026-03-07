@@ -1,77 +1,94 @@
 # skills-catalog
 
-> Spec comportamental — catalogo global de skills da nuvem exibido na tela `/skills`.
+> Spec comportamental — hub operacional de skills exibido na tela `/skills`.
 
 ## Proposito
 
-Definir `/skills` como a superficie principal de descoberta e instalacao de skills. A tela sempre parte do inventario unico do provider e usa `workspace + agente` apenas como contexto de destino e de estado de instalacao.
+Definir `/skills` como a superficie principal para operar skills entre nuvem e workspaces locais. A tela parte da divisao explicita entre `Nuvem` e `Workspaces`, mostra cada workspace por agente e oferece as acoes gerenciadas de baixar, subir, copiar, mover e comparar.
 
 ## Localizacao
 
 - **UI**: `ui/src/pages/SkillsPage.tsx`, `ui/src/pages/SkillDetailPage.tsx`, `ui/src/components/deploy/DeployDialog.tsx`
-- **Hooks**: `ui/src/hooks/useSkills.ts`, `ui/src/hooks/useDeploy.ts`
-- **API consumida**: `src/api/routes/skills.ts`, `src/api/routes/deploy.ts`
-- **Core**: `src/core/workspace-catalog.ts`
+- **Hooks**: `ui/src/hooks/useSkills.ts`
+- **API consumida**: `src/api/routes/skills.ts`
+- **Core**: `src/core/skills-hub.ts`, `src/core/workspace.ts`
 
 ## Invariantes
 
-1. A tela `/skills` usa `GET /api/skills/catalog` como fonte de verdade; ela nao reconstrui agrupamentos por workspace no frontend.
-2. Cada skill da nuvem aparece uma unica vez no catalogo, porque o provider e a autoridade global para nomes.
-3. Selecionar `workspace` e `agente` nao duplica itens; apenas resolve o `installState` de cada skill para aquele destino.
-4. Sem `workspace + agente`, o `installState` e `unknown`, os checkboxes ficam desabilitados e nao ha instalacao em lote.
-5. Os filtros globais da tela sao `texto`, `tipo`, `categoria` e `tag`.
-6. Os filtros de destino da tela sao `workspace`, `agente` e `estado no destino`.
-7. `POST /api/deploy` para a UI de skills sempre envia `workspaceFilePath` e `target` explicitos.
-8. Drift local, skills fora do manifesto e problemas de inventario local nao sao exibidos em `/skills`; esses estados pertencem a `/workspace`.
-9. A pagina `/skills/:name` continua representando a definicao global da skill; o CTA principal e instalar, nunca “atribuir automaticamente” a um workspace.
+1. `/skills` usa `GET /api/skills/hub` como shell de leitura e `GET /api/skills/hub/workspace` para expandir cada workspace sob demanda.
+2. A tela sempre separa `Nuvem` e `Workspaces`; quando recolhidos, apenas os cabecalhos dessas secoes ficam visiveis.
+3. `Nuvem` lista cada skill global uma unica vez, porque o provider continua sendo a autoridade de nomes.
+4. Cada workspace expandido agrupa o inventario local por agente (`Codex`, `Claude Code`, `Cursor`), sem misturar agentes no mesmo bloco.
+5. O estado unificado das skills no hub e um dentre: `synced`, `cloud_only`, `local_only`, `diverged`, `missing_in_provider`.
+6. O estado da skill nao substitui a informacao de manifesto; a UI continua exibindo separadamente se a skill esta ou nao vinculada ao manifesto do workspace.
+7. `Baixar` sempre significa `nuvem -> workspace + agente`, com atualizacao do manifesto e deploy imediato.
+8. `Subir` sempre significa `workspace + agente -> nuvem`; se a skill estiver `diverged`, a UI exige comparacao e confirmacao antes de sobrescrever.
+9. `Copiar` preserva a origem e adiciona a skill ao destino; `Mover` faz `Copiar` e depois remove o target da origem com `undeploy`.
+10. `/skills/:name` continua representando a definicao global da skill, mas o CTA principal passa a ser “Baixar para workspace”.
 
 ## Comportamentos (Given/When/Then)
 
-### Cenario: Abrir o catalogo sem destino
+### Cenario: Abrir o hub recolhido
 
-- **Given**: Existem skills disponiveis no provider
-- **When**: O usuario abre `/skills` sem escolher `workspace` nem `agente`
-- **Then**: Cada skill aparece uma unica vez, a tela exibe apenas o catalogo global e a selecao em lote permanece desabilitada
+- **Given**: Existem skills no provider e workspaces registrados
+- **When**: O usuario abre `/skills`
+- **Then**: A pagina mostra um cabecalho para `Nuvem` e um cabecalho para cada workspace, sem cards de skill visiveis enquanto os blocos estiverem recolhidos
 
-### Cenario: Escolher destino explicito
+### Cenario: Expandir a nuvem
 
-- **Given**: O usuario escolheu um workspace e depois um agente
-- **When**: O catalogo e recarregado
-- **Then**: Cada card passa a mostrar `Instalada` ou `Nao instalada` apenas para aquele destino
+- **Given**: O provider contem skills disponiveis
+- **When**: O usuario expande a secao `Nuvem`
+- **Then**: A lista mostra skills globais unicas, com busca/filtro por tipo e acao `Baixar para...`
 
-### Cenario: Trocar workspace
+### Cenario: Expandir um workspace
 
-- **Given**: O usuario ja havia escolhido skills e um agente
-- **When**: Troca o workspace no seletor de destino
-- **Then**: O agente e a selecao atual sao limpos antes de continuar
+- **Given**: Existe um workspace registrado com inventario local
+- **When**: O usuario expande esse workspace
+- **Then**: A UI carrega sob demanda o detalhe do workspace e renderiza um painel separado por agente, cada um com contadores e lista de skills
 
-### Cenario: Filtrar por estado no destino
+### Cenario: Baixar da nuvem para um destino
 
-- **Given**: Existe um destino selecionado com algumas skills instaladas e outras nao
-- **When**: O usuario escolhe o filtro `Instalada`
-- **Then**: A lista mostra apenas as skills presentes naquele `workspace + agente`, mas as contagens de estado continuam refletindo o resultado base do destino
+- **Given**: O usuario escolheu uma ou mais skills da nuvem e um `workspace + agente`
+- **When**: Confirma a operacao `Baixar`
+- **Then**: A skill e adicionada ao manifesto do workspace, baixada do provider e escrita no diretorio local do agente
 
-### Cenario: Instalar varias skills
+### Cenario: Comparar uma skill divergente
 
-- **Given**: O usuario escolheu `workspace + agente` e marcou varias skills
-- **When**: Confirma a instalacao
-- **Then**: O dialogo envia um lote unico para `POST /api/deploy` com `skills[]`, `workspaceFilePath` e `target`
+- **Given**: Uma skill local difere da versao da nuvem
+- **When**: O usuario clica em `Comparar`
+- **Then**: A UI abre um modal com preview lado a lado de `Local` e `Nuvem`, sem sobrescrever nada automaticamente
 
-### Cenario: Abrir detalhe global de uma skill
+### Cenario: Confirmar upload apos comparacao
 
-- **Given**: O usuario abre `/skills/fiscal-nfe`
-- **When**: Clica em `Instalar`
-- **Then**: O dialogo solicita ou reutiliza um destino explicito antes do deploy
+- **Given**: O modal de comparacao foi aberto para uma skill `diverged`
+- **When**: O usuario confirma `Subir para nuvem`
+- **Then**: A API usa a versao local canonicalizada e envia ao provider com `force=true`, registrando warning quando a origem local for lossless/lossy
+
+### Cenario: Mover skill entre workspaces
+
+- **Given**: Uma skill local existe em `workspace A + agente X`
+- **When**: O usuario escolhe `Mover para...` e confirma um `workspace B + agente Y`
+- **Then**: A skill e escrita no destino, o manifesto do destino recebe o novo target, e a origem e removida do manifesto com `undeploy`
 
 ## Decisoes de Design
 
 | Decisao | Motivo |
 |---------|--------|
-| Catalogo cloud-first | Mantem nomes unicos e elimina repeticao artificial por workspace |
-| Destino separado do inventario | Permite comparar “catalogo global” e “estado local” sem misturar conceitos |
-| Instalacao em lote para um unico destino por vez | Reduz ambiguidade operacional e facilita feedback de sucesso/falha |
-| Filtros globais independentes do workspace | A busca principal e sobre o catalogo da nuvem, nao sobre o disco local |
-| Pagina de detalhe continua global | A skill deve ter uma unica definicao central, independentemente de quantos workspaces a usem |
+| `/skills` como hub operacional | Reduz a ida e volta entre catalogo cloud-first e diagnostico local |
+| Accordion multi-expand | Mantem a tela limpa quando recolhida e permite trabalhar em varios workspaces ao mesmo tempo |
+| Comparacao obrigatoria para `diverged` | Impede sobrescrita silenciosa entre disco local e provider |
+| Selecao + envio no primeiro corte | E mais clara e acessivel do que drag-and-drop para operacoes potencialmente destrutivas |
+| Read model proprio para `/skills` | Evita reconstruir no frontend a relacao entre provider, manifesto, disco e formato de cada agente |
+
+## Referencias de codigo
+
+- `src/core/skills-hub.ts`
+- `src/core/workspace.ts`
+- `src/api/routes/skills.ts`
+- `ui/src/pages/SkillsPage.tsx`
+- `ui/src/pages/SkillDetailPage.tsx`
+- `tests/core/skills-hub.test.ts`
+- `tests/core/workspace.test.ts`
 
 ## Changelog
 
@@ -79,3 +96,4 @@ Definir `/skills` como a superficie principal de descoberta e instalacao de skil
 |------|---------|
 | 2026-03-06 | Spec criada para documentar o agrupamento de skills por workspace na tela `/skills` |
 | 2026-03-07 | Reescrita para o modelo cloud-first com itens unicos, destino explicito `workspace + agente` e instalacao em lote |
+| 2026-03-07 | Atualizada para o modelo de hub operacional com secoes `Nuvem` e `Workspaces`, comparacao obrigatoria de divergencia e acoes gerenciadas de download/upload/transfer |

@@ -7,6 +7,10 @@ import type {
   HealthData,
   SkillSummary,
   SkillsCatalog,
+  SkillsHubActionResult,
+  SkillsHubDiffResult,
+  SkillsHubShell,
+  SkillsHubWorkspaceDetail,
   CloudSkillInstallState,
   DeployTarget,
   SkillPackage,
@@ -84,6 +88,74 @@ export async function fetchSkillsCatalog(filters?: {
   if (filters?.tag) params.tag = filters.tag;
   if (filters?.installState) params.installState = filters.installState;
   return unwrap(await api.get<ApiSuccess<SkillsCatalog>>('/skills/catalog', { params }));
+}
+
+export async function fetchSkillsHub(filters?: {
+  q?: string;
+  type?: 'skill' | 'prompt' | 'subagent';
+  category?: string;
+  tag?: string;
+}): Promise<SkillsHubShell> {
+  const params: Record<string, string> = {};
+  if (filters?.q) params.q = filters.q;
+  if (filters?.type) params.type = filters.type;
+  if (filters?.category) params.category = filters.category;
+  if (filters?.tag) params.tag = filters.tag;
+  return unwrap(await api.get<ApiSuccess<SkillsHubShell>>('/skills/hub', { params }));
+}
+
+export async function fetchSkillsHubWorkspace(filePath: string): Promise<SkillsHubWorkspaceDetail> {
+  return unwrap(
+    await api.get<ApiSuccess<SkillsHubWorkspaceDetail>>('/skills/hub/workspace', {
+      params: { filePath },
+    }),
+  );
+}
+
+export async function fetchSkillsHubDiff(params: {
+  filePath: string;
+  target: DeployTarget;
+  name: string;
+}): Promise<SkillsHubDiffResult> {
+  return unwrap(
+    await api.get<ApiSuccess<SkillsHubDiffResult>>('/skills/hub/diff', {
+      params,
+    }),
+  );
+}
+
+export async function downloadSkillsToWorkspace(body: {
+  filePath: string;
+  target: DeployTarget;
+  skills: string[];
+}): Promise<SkillsHubActionResult> {
+  return unwrap(
+    await api.post<ApiSuccess<SkillsHubActionResult>>('/skills/hub/actions/download', body),
+  );
+}
+
+export async function uploadSkillsToCloud(body: {
+  filePath: string;
+  target: DeployTarget;
+  skills: string[];
+  force?: boolean;
+}): Promise<SkillsHubActionResult> {
+  return unwrap(
+    await api.post<ApiSuccess<SkillsHubActionResult>>('/skills/hub/actions/upload', body),
+  );
+}
+
+export async function transferSkillsBetweenWorkspaces(body: {
+  sourceWorkspaceFilePath: string;
+  sourceTarget: DeployTarget;
+  destinationWorkspaceFilePath: string;
+  destinationTarget: DeployTarget;
+  skills: string[];
+  mode: 'copy' | 'move';
+}): Promise<SkillsHubActionResult> {
+  return unwrap(
+    await api.post<ApiSuccess<SkillsHubActionResult>>('/skills/hub/actions/transfer', body),
+  );
 }
 
 export async function fetchSkill(name: string): Promise<SkillPackage> {

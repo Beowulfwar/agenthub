@@ -17,35 +17,35 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 1. Toda resposta de sucesso usa envelope `{ data: T }`.
 2. Toda resposta de erro usa envelope `{ error: { code, message } }`.
 3. O error handler mapeia erros de dominio de forma deterministica, incluindo `WorkspaceSkillReferenceError -> 400`.
-4. `GET /api/skills/catalog` devolve apenas skills do provider, uma unica vez por nome.
-5. `GET /api/skills/catalog` aceita contexto opcional de destino (`workspaceFilePath`, `target`) para resolver `installState`, mas esse contexto nao altera a unicidade do catalogo.
+4. `GET /api/skills/hub` devolve a shell do hub operacional com a secao global `Nuvem` e o resumo dos `Workspaces`.
+5. `GET /api/skills/hub/workspace` carrega um workspace sob demanda e devolve skills agrupadas por agente com estado unificado (`synced`, `cloud_only`, `local_only`, `diverged`, `missing_in_provider`).
 6. `GET /api/workspace` devolve `agents[]` com inventario local agrupado por target de deploy e `apps[]` com diagnostico oficial por app/repositorio.
 7. `GET /api/workspace/registry` separa contadores de manifesto e disco local; `skillCount` permanece apenas como alias retrocompativel da contagem configurada.
 8. `PUT /api/workspace`, `POST /api/sync` e `GET /api/sync/stream` validam referencias do manifesto contra o provider antes de persistir ou sincronizar.
-9. `POST /api/deploy` aceita destino explicito via `workspaceFilePath` e `target`; quando omitidos, o comportamento legado pode usar fallback do workspace ativo.
+9. `POST /api/skills/hub/actions/download`, `upload` e `transfer` sao as rotas gerenciadas da UI de `/skills`; `POST /api/deploy` continua apenas por compatibilidade.
 10. CORS so fica habilitado em modo dev.
 11. `GET /api/apps/catalog` expõe apenas apps do registro oficial e seus niveis de suporte.
 12. `POST /api/migrations/plan` e sempre dry-run e nunca escreve no disco.
 
 ## Comportamentos (Given/When/Then)
 
-### Cenario: Catalogo cloud-first sem destino
+### Cenario: Shell do hub de skills
 
 - **Given**: O provider contem `fiscal-nfe` e `performance-sql`
-- **When**: `GET /api/skills/catalog`
-- **Then**: A resposta inclui apenas `items[]` dessas skills, com `installState=unknown`
+- **When**: `GET /api/skills/hub`
+- **Then**: A resposta inclui a secao `cloud.items[]` e `workspaces[]` resumidos, sem detalhe local completo por agente
 
-### Cenario: Catalogo com destino explicito
+### Cenario: Expandir um workspace no hub
 
-- **Given**: Existe um workspace em `/projeto/app` e a skill `fiscal-nfe` esta instalada em `codex`
-- **When**: `GET /api/skills/catalog?workspaceFilePath=/projeto/app/ahub.workspace.json&target=codex`
-- **Then**: `fiscal-nfe` vem com `installState=installed` sem duplicar itens por workspace
+- **Given**: Existe um workspace em `/projeto/app` com skills locais em `codex` e `claude-code`
+- **When**: `GET /api/skills/hub/workspace?filePath=/projeto/app/ahub.workspace.json`
+- **Then**: A resposta inclui `agents[]`, cada um com `skills[]`, `counts` e status unificado por skill
 
-### Cenario: Filtrar por estado no destino
+### Cenario: Comparar skill local com nuvem
 
-- **Given**: O destino escolhido possui skills instaladas e nao instaladas
-- **When**: `GET /api/skills/catalog?...&installState=installed`
-- **Then**: `items[]` retorna apenas as instaladas, mas `counts` continua refletindo o conjunto base apos os demais filtros
+- **Given**: Uma skill local diverge da nuvem
+- **When**: `GET /api/skills/hub/diff?filePath=/projeto/app/ahub.workspace.json&target=codex&name=fiscal-nfe`
+- **Then**: A resposta inclui `local`, `cloud`, `status`, `lossiness`, `canUpload` e `canDownload`
 
 ### Cenario: Consultar workspace com inventario por agente
 
@@ -71,6 +71,24 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 - **When**: `POST /api/deploy`
 - **Then**: A API instala a skill apenas nesse destino, sem depender do workspace ativo
 
+### Cenario: Baixar da nuvem pelo hub
+
+- **Given**: O body e `{ filePath: "/projeto/app/ahub.workspace.json", target: "codex", skills: ["fiscal-nfe"] }`
+- **When**: `POST /api/skills/hub/actions/download`
+- **Then**: A API baixa a skill do provider, instala no destino e atualiza o manifesto do workspace
+
+### Cenario: Bloquear upload divergente sem confirmacao
+
+- **Given**: O body e `{ filePath: "/projeto/app/ahub.workspace.json", target: "claude-code", skills: ["fiscal-nfe"] }` e a skill diverge da nuvem
+- **When**: `POST /api/skills/hub/actions/upload`
+- **Then**: A API devolve falha com codigo `DIFF_CONFIRMATION_REQUIRED` sem sobrescrever o provider
+
+### Cenario: Mover skill entre workspaces
+
+- **Given**: O body contem origem, destino, `mode=move` e uma skill local valida
+- **When**: `POST /api/skills/hub/actions/transfer`
+- **Then**: A API escreve no destino, atualiza os dois manifestos e faz `undeploy` na origem
+
 ### Cenario: Salvar manifesto com skill ausente do provider
 
 - **Given**: O body de `PUT /api/workspace` referencia uma skill que nao existe no provider
@@ -86,7 +104,13 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 | GET | `/api/health` | Status do provider, cache e configuracao | `{ data: HealthStatus }` | — |
 | GET | `/api/apps/catalog` | Catalogo oficial de apps/repositorios e nivel de suporte | `{ data: AgentAppCatalogItem[] }` | — |
 | GET | `/api/skills?q=&detailed=` | Listar ou detalhar skills do provider | `{ data: string[] \| SkillSummary[] }` | — |
-| GET | `/api/skills/catalog?q=&workspaceFilePath=&target=&type=&category=&tag=&installState=` | Catalogo cloud-first com contexto opcional de destino | `{ data: SkillsCatalog }` | — |
+| GET | `/api/skills/catalog?q=&workspaceFilePath=&target=&type=&category=&tag=&installState=` | Catalogo cloud-first legado, mantido por compatibilidade | `{ data: SkillsCatalog }` | — |
+| GET | `/api/skills/hub?q=&type=&category=&tag=` | Shell do hub operacional de skills | `{ data: SkillsHubShell }` | — |
+| GET | `/api/skills/hub/workspace?filePath=` | Detalhe lazy de um workspace agrupado por agente | `{ data: SkillsHubWorkspaceDetail }` | 400 |
+| GET | `/api/skills/hub/diff?filePath=&target=&name=` | Preview de comparacao local vs nuvem | `{ data: SkillsHubDiffResult }` | 400 |
+| POST | `/api/skills/hub/actions/download` | Baixar da nuvem para `workspace + agente` com persistencia no manifesto | `{ data: SkillsHubActionResult }` | 400 |
+| POST | `/api/skills/hub/actions/upload` | Subir do local para a nuvem, com bloqueio de divergencia sem confirmacao | `{ data: SkillsHubActionResult }` | 400 |
+| POST | `/api/skills/hub/actions/transfer` | Copiar ou mover skill entre workspaces/agentes | `{ data: SkillsHubActionResult }` | 400 |
 | GET | `/api/skills/:name` | Obter `SkillPackage` completo | `{ data: SkillPackage }` | 404 |
 | PUT | `/api/skills/:name` | Criar ou atualizar skill | `{ data: { name, type } }` | 400, 404 |
 | PATCH | `/api/skills/:name` | Atualizacao parcial de skill | `{ data: { name, type } }` | 400, 404 |
@@ -127,6 +151,12 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 
 - `GET /api/health`: le configuracao e consulta saude do provider.
 - `GET /api/skills/catalog`: lista skills no provider e, quando ha destino explicito, observa o disco local apenas para resolver estado de instalacao.
+- `GET /api/skills/hub`: lista skills do provider e sumariza workspaces registrados para a UI principal de `/skills`.
+- `GET /api/skills/hub/workspace`: le manifesto, discos locais e provider para montar o detalhe por agente.
+- `GET /api/skills/hub/diff`: le a skill local detectada e a versao do provider para montar o preview de comparacao.
+- `POST /api/skills/hub/actions/download`: baixa do provider, escreve no disco e atualiza o manifesto do workspace.
+- `POST /api/skills/hub/actions/upload`: canonicaliza a skill local e grava no backend de storage.
+- `POST /api/skills/hub/actions/transfer`: escreve no destino e, quando `mode=move`, tambem remove a origem do disco e do manifesto.
 - `PUT`, `PATCH` e `DELETE /api/skills/:name`: alteram o backend de storage.
 - `POST /api/workspace/registry`: pode criar `ahub.workspace.json`; quando `localSkillStrategy=adopt`, tambem observa skills locais e consulta o provider para montar o manifesto inicial.
 - `GET /api/workspace`: le manifesto, diretorios de deploy, inventario local por agente e diagnostico por app.
@@ -140,7 +170,7 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 
 | Decisao | Justificativa |
 |---------|---------------|
-| Catalogo cloud-first em rota dedicada | A UI de `/skills` precisa de um unico contrato global e sem duplicidade por workspace |
+| Hub operacional em rotas dedicadas | A UI de `/skills` precisa separar nuvem, workspaces, comparacao e acoes sem remontar a logica no frontend |
 | Destino explicito em `/api/deploy` | Remove dependencia operacional do “workspace ativo” para instalacoes vindas da UI |
 | `agents[]` em `/api/workspace` | Coloca o diagnostico local por target no backend, sem heuristica duplicada no frontend |
 | `skillCount` mantido como alias | Preserva compatibilidade enquanto a UI usa metricas mais explicitas |
@@ -152,3 +182,4 @@ Documentar o contrato observavel da API REST servida por Hono. Para skills e wor
 | 2025-03-05 | Spec criada |
 | 2026-03-06 | Documentado registro de workspace por diretorio, explorer REST e validacao de manifesto contra o provider |
 | 2026-03-07 | Reescrita para o modelo cloud-first em `/api/skills/catalog`, inventario por agente em `/api/workspace` e deploy com destino explicito |
+| 2026-03-07 | Atualizada para o hub operacional de skills com rotas `/api/skills/hub/*`, comparacao de divergencia e acoes gerenciadas de download/upload/transfer |

@@ -255,3 +255,90 @@ export function resolveManifestSkills(
 
   return result.sort((a, b) => a.name.localeCompare(b.name));
 }
+
+function cloneManifest(manifest: WorkspaceManifest): WorkspaceManifest {
+  return {
+    ...manifest,
+    ...(manifest.defaultTargets ? { defaultTargets: [...manifest.defaultTargets] } : {}),
+    ...(manifest.skills
+      ? {
+          skills: manifest.skills.map((entry) => ({
+            ...entry,
+            ...(entry.targets ? { targets: [...entry.targets] } : {}),
+          })),
+        }
+      : {}),
+    ...(manifest.groups
+      ? {
+          groups: manifest.groups.map((group) => ({
+            targets: [...group.targets],
+            skills: [...group.skills],
+          })),
+        }
+      : {}),
+  };
+}
+
+export function setSkillTargetsInManifest(
+  manifest: WorkspaceManifest,
+  name: string,
+  targets: DeployTarget[],
+): WorkspaceManifest {
+  assertSafeSkillName(name);
+  const nextManifest = cloneManifest(manifest);
+  const normalizedTargets = [...new Set(targets)].sort();
+
+  if (nextManifest.skills) {
+    nextManifest.skills = nextManifest.skills.filter((entry) => entry.name !== name);
+    if (nextManifest.skills.length === 0) {
+      delete nextManifest.skills;
+    }
+  }
+
+  if (nextManifest.groups) {
+    nextManifest.groups = nextManifest.groups
+      .map((group) => ({
+        ...group,
+        skills: group.skills.filter((skillName) => skillName !== name),
+      }))
+      .filter((group) => group.skills.length > 0);
+
+    if (nextManifest.groups.length === 0) {
+      delete nextManifest.groups;
+    }
+  }
+
+  if (normalizedTargets.length === 0) {
+    return nextManifest;
+  }
+
+  const nextEntry: WorkspaceSkillEntry = { name, targets: normalizedTargets };
+  nextManifest.skills = [...(nextManifest.skills ?? []), nextEntry].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  return nextManifest;
+}
+
+export function addTargetToManifest(
+  manifest: WorkspaceManifest,
+  name: string,
+  target: DeployTarget,
+): WorkspaceManifest {
+  const currentTargets =
+    resolveManifestSkills(manifest).find((entry) => entry.name === name)?.targets ?? [];
+  return setSkillTargetsInManifest(manifest, name, [...currentTargets, target]);
+}
+
+export function removeTargetFromManifest(
+  manifest: WorkspaceManifest,
+  name: string,
+  target: DeployTarget,
+): WorkspaceManifest {
+  const currentTargets =
+    resolveManifestSkills(manifest).find((entry) => entry.name === name)?.targets ?? [];
+  return setSkillTargetsInManifest(
+    manifest,
+    name,
+    currentTargets.filter((entry) => entry !== target),
+  );
+}

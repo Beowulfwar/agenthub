@@ -388,6 +388,132 @@ export interface SkillsCatalog {
   counts: Record<CloudSkillInstallState, number>;
 }
 
+export type SkillsHubStatus =
+  | 'synced'
+  | 'cloud_only'
+  | 'local_only'
+  | 'diverged'
+  | 'missing_in_provider';
+
+export interface SkillsHubCloudItem {
+  name: string;
+  type: 'skill' | 'prompt' | 'subagent';
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  workspaceUsageCount: number;
+  divergedWorkspaceCount: number;
+}
+
+export interface SkillsHubCloudSection {
+  total: number;
+  items: SkillsHubCloudItem[];
+  availableFilters: CloudSkillCatalogFilters;
+}
+
+export interface SkillsHubWorkspaceAgentSummary {
+  target: DeployTarget;
+  label: string;
+  counts: Record<SkillsHubStatus, number> & { total: number };
+}
+
+export interface SkillsHubWorkspaceSummary {
+  filePath: string;
+  workspaceDir: string;
+  workspaceName: string;
+  isActive: boolean;
+  counts: Record<SkillsHubStatus, number> & { total: number };
+  agents: SkillsHubWorkspaceAgentSummary[];
+  driftCount: number;
+}
+
+export interface SkillsHubShell {
+  cloud: SkillsHubCloudSection;
+  workspaces: SkillsHubWorkspaceSummary[];
+}
+
+export interface SkillsHubWorkspaceSkill {
+  name: string;
+  type: 'skill' | 'prompt' | 'subagent' | null;
+  description: string | null;
+  category: string | null;
+  tags: string[];
+  fileCount: number;
+  status: SkillsHubStatus;
+  inManifest: boolean;
+  installedLocally: boolean;
+  existsInProvider: boolean;
+  lossiness: ArtifactLossiness;
+  warning?: string;
+  localPaths: string[];
+  availableActions: Array<'download' | 'upload' | 'copy' | 'move' | 'compare'>;
+}
+
+export interface SkillsHubWorkspaceAgentDetail {
+  target: DeployTarget;
+  label: string;
+  source: 'workspace-local' | 'config-override' | 'tool-default';
+  rootPath: string;
+  skillPath: string;
+  exists: boolean;
+  counts: Record<SkillsHubStatus, number> & { total: number };
+  skills: SkillsHubWorkspaceSkill[];
+}
+
+export interface SkillsHubWorkspaceDetail {
+  filePath: string;
+  workspaceDir: string;
+  workspaceName: string;
+  isActive: boolean;
+  counts: Record<SkillsHubStatus, number> & { total: number };
+  agents: SkillsHubWorkspaceAgentDetail[];
+}
+
+export interface SkillsHubDiffSide {
+  exists: boolean;
+  hash: string | null;
+  preview: string | null;
+  detectedPath?: string;
+  fileCount?: number;
+  type?: 'skill' | 'prompt' | 'subagent' | null;
+}
+
+export interface SkillsHubDiffResult {
+  name: string;
+  workspaceFilePath: string;
+  workspaceName: string;
+  target: DeployTarget;
+  status: SkillsHubStatus;
+  lossiness: ArtifactLossiness;
+  warning?: string;
+  local: SkillsHubDiffSide;
+  cloud: SkillsHubDiffSide;
+  canUpload: boolean;
+  canDownload: boolean;
+}
+
+export interface SkillsHubActionSuccess {
+  skill: string;
+  target?: DeployTarget;
+  path?: string;
+  message: string;
+  warning?: string;
+  lossiness?: ArtifactLossiness;
+}
+
+export interface SkillsHubActionFailure {
+  skill: string;
+  target?: DeployTarget;
+  error: string;
+  code?: string;
+}
+
+export interface SkillsHubActionResult {
+  successful: SkillsHubActionSuccess[];
+  failed: SkillsHubActionFailure[];
+}
+
 export type WorkspaceAgentSkillStatus =
   | 'manifest_and_installed'
   | 'manifest_missing_local'

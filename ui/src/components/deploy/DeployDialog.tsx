@@ -39,9 +39,9 @@ export function DeployDialog({
 
   const ready = Boolean(workspaceFilePath && target);
 
-  const handleDeploy = () => {
+    const handleDeploy = () => {
     if (!workspaceFilePath || !target) {
-      toast.error('Selecione um workspace e um agente para instalar as skills');
+      toast.error('Selecione um workspace e um agente para baixar as skills');
       return;
     }
 
@@ -54,14 +54,14 @@ export function DeployDialog({
       {
         onSuccess: (result) => {
           if (result.failed.length === 0) {
-            toast.success(`${result.deployed.length} skill(s) instalada(s) com sucesso`);
+            toast.success(`${result.deployed.length} skill(s) baixada(s) com sucesso`);
           } else {
-            toast.warning(`Instaladas ${result.deployed.length}, com ${result.failed.length} falha(s)`);
+            toast.warning(`Baixadas ${result.deployed.length}, com ${result.failed.length} falha(s)`);
           }
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel instalar as skills');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar as skills');
         },
       },
     );
@@ -71,7 +71,7 @@ export function DeployDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Instalar skills</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Baixar skills para workspace</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
@@ -181,7 +181,7 @@ export function DeployDialog({
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
-            {deployMutation.isPending ? 'Instalando...' : 'Instalar no destino'}
+            {deployMutation.isPending ? 'Baixando...' : 'Baixar no destino'}
           </button>
         </div>
       </div>

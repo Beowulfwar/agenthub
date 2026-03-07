@@ -18,7 +18,7 @@ Documentacao comportamental spec-driven. Cada spec e' um contrato vivo que docum
 | [core-workspace](core-workspace.md) | Workspace manifest | `src/core/workspace.ts` | `tests/specs/core-workspace.spec.ts` |
 | [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto com diagnostico local por agente | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
 | [app-repository-registry](app-repository-registry.md) | Registro oficial de repositorios locais por app e plano de migracao | `src/core/app-registry.ts`, `src/core/app-artifacts.ts`, `src/core/app-migration.ts` | — |
-| [skills-catalog](skills-catalog.md) | Catalogo global de skills da nuvem com destino explicito | `ui/src/pages/SkillsPage.tsx` | — |
+| [skills-catalog](skills-catalog.md) | Hub operacional de skills entre nuvem e workspaces | `ui/src/pages/SkillsPage.tsx`, `src/core/skills-hub.ts` | `tests/core/skills-hub.test.ts` |
 | [core-sync](core-sync.md) | Sync engine | `src/core/sync.ts` | `tests/specs/core-sync.spec.ts` |
 | [core-cache](core-cache.md) | Cache com TTL | `src/core/cache.ts` | `tests/specs/core-cache.spec.ts` |
 | [storage-provider](storage-provider.md) | Storage factory + providers | `src/storage/` | — |

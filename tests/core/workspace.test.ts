@@ -4,11 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  addTargetToManifest,
   WORKSPACE_FILENAMES,
   findWorkspaceManifest,
   loadWorkspaceManifest,
+  removeTargetFromManifest,
   requireWorkspaceManifest,
   saveWorkspaceManifest,
+  setSkillTargetsInManifest,
   resolveManifestSkills,
 } from '../../src/core/workspace.js';
 import { WorkspaceNotFoundError } from '../../src/core/errors.js';
@@ -368,5 +371,54 @@ describe('resolveManifestSkills', () => {
 
     const resolved = resolveManifestSkills(manifest);
     expect(resolved[0].targets).toEqual(['claude-code', 'cursor']);
+  });
+});
+
+describe('workspace manifest mutation helpers', () => {
+  it('addTargetToManifest appends a new explicit target for an existing skill', () => {
+    const manifest: WorkspaceManifest = {
+      version: 1,
+      defaultTargets: ['claude-code'],
+      skills: [{ name: 'alpha' }],
+    };
+
+    const updated = addTargetToManifest(manifest, 'alpha', 'codex');
+
+    expect(resolveManifestSkills(updated)).toEqual([
+      { name: 'alpha', targets: ['claude-code', 'codex'] },
+    ]);
+    expect(updated.skills).toEqual([{ name: 'alpha', targets: ['claude-code', 'codex'] }]);
+  });
+
+  it('removeTargetFromManifest removes the skill entirely when no targets remain', () => {
+    const manifest: WorkspaceManifest = {
+      version: 1,
+      skills: [{ name: 'alpha', targets: ['codex'] }],
+    };
+
+    const updated = removeTargetFromManifest(manifest, 'alpha', 'codex');
+
+    expect(resolveManifestSkills(updated)).toEqual([]);
+    expect(updated.skills).toBeUndefined();
+  });
+
+  it('setSkillTargetsInManifest removes the skill from groups and reinserts it as a flat entry', () => {
+    const manifest: WorkspaceManifest = {
+      version: 1,
+      groups: [
+        { targets: ['claude-code', 'cursor'], skills: ['alpha', 'beta'] },
+      ],
+    };
+
+    const updated = setSkillTargetsInManifest(manifest, 'alpha', ['cursor']);
+
+    expect(updated.groups).toEqual([
+      { targets: ['claude-code', 'cursor'], skills: ['beta'] },
+    ]);
+    expect(updated.skills).toEqual([{ name: 'alpha', targets: ['cursor'] }]);
+    expect(resolveManifestSkills(updated)).toEqual([
+      { name: 'alpha', targets: ['cursor'] },
+      { name: 'beta', targets: ['claude-code', 'cursor'] },
+    ]);
   });
 });

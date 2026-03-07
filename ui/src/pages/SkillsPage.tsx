@@ -1,90 +1,107 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  BookOpen,
+  ArrowRightLeft,
+  ChevronDown,
+  Cloud,
   Download,
-  Filter,
   FolderKanban,
+  GitCompare,
   Layers3,
+  MoveRight,
+  Upload,
 } from 'lucide-react';
-import { useSkillsCatalog } from '../hooks/useSkills';
-import { useWorkspaceRegistry } from '../hooks/useWorkspace';
+import { toast } from 'sonner';
 import { SearchBar } from '../components/skills/SearchBar';
-import { DeployDialog } from '../components/deploy/DeployDialog';
-import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { EmptyState } from '../components/shared/EmptyState';
+import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import {
+  useSkillsHub,
+  useSkillsHubDiff,
+  useSkillsHubDownload,
+  useSkillsHubTransfer,
+  useSkillsHubUpload,
+  useSkillsHubWorkspace,
+} from '../hooks/useSkills';
 import { cn } from '../lib/utils';
 import type {
-  CloudSkillCatalogItem,
-  CloudSkillInstallState,
   DeployTarget,
+  SkillsHubCloudItem,
+  SkillsHubDiffResult,
+  SkillsHubStatus,
+  SkillsHubWorkspaceAgentDetail,
+  SkillsHubWorkspaceSkill,
+  SkillsHubWorkspaceSummary,
 } from '../api/types';
 
-const TARGETS: Array<{ value: DeployTarget; label: string; className: string }> = [
-  { value: 'claude-code', label: 'Claude Code', className: 'border-orange-300 bg-orange-50 text-orange-700' },
-  { value: 'codex', label: 'Codex', className: 'border-blue-300 bg-blue-50 text-blue-700' },
-  { value: 'cursor', label: 'Cursor', className: 'border-cyan-300 bg-cyan-50 text-cyan-700' },
-];
-
-const INSTALL_STATE_META: Record<CloudSkillInstallState, { label: string; className: string }> = {
-  installed: { label: 'Instalada', className: 'bg-emerald-100 text-emerald-700' },
-  not_installed: { label: 'Nao instalada', className: 'bg-slate-100 text-slate-700' },
-  unknown: { label: 'Sem destino', className: 'bg-gray-100 text-gray-600' },
+const TARGET_META: Record<DeployTarget, { label: string; className: string }> = {
+  'claude-code': {
+    label: 'Claude Code',
+    className: 'border-orange-200 bg-orange-50 text-orange-700',
+  },
+  codex: {
+    label: 'Codex',
+    className: 'border-blue-200 bg-blue-50 text-blue-700',
+  },
+  cursor: {
+    label: 'Cursor',
+    className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  },
 };
+
+const STATUS_META: Record<SkillsHubStatus, { label: string; className: string }> = {
+  synced: {
+    label: 'Sincronizada',
+    className: 'bg-emerald-100 text-emerald-700',
+  },
+  cloud_only: {
+    label: 'So na nuvem',
+    className: 'bg-sky-100 text-sky-700',
+  },
+  local_only: {
+    label: 'So local',
+    className: 'bg-slate-100 text-slate-700',
+  },
+  diverged: {
+    label: 'Divergente',
+    className: 'bg-amber-100 text-amber-700',
+  },
+  missing_in_provider: {
+    label: 'Ausente na nuvem',
+    className: 'bg-red-100 text-red-700',
+  },
+};
+
+type TransferDialogState =
+  | {
+      mode: 'copy' | 'move';
+      skills: string[];
+      sourceWorkspaceFilePath: string;
+      sourceTarget: DeployTarget;
+    }
+  | null;
 
 export function SkillsPage() {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'skill' | 'prompt' | 'subagent' | ''>('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
-  const [workspaceFilePath, setWorkspaceFilePath] = useState('');
-  const [target, setTarget] = useState<DeployTarget | ''>('');
-  const [installState, setInstallState] = useState<CloudSkillInstallState | ''>('');
-  const [selected, setSelected] = useState<string[]>([]);
-  const [showInstallDialog, setShowInstallDialog] = useState(false);
+  const [expandedCloud, setExpandedCloud] = useState(true);
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
 
-  const workspaceRegistry = useWorkspaceRegistry();
-  const catalog = useSkillsCatalog({
+  const hub = useSkillsHub({
     ...(query ? { q: query } : {}),
-    ...(workspaceFilePath ? { workspaceFilePath } : {}),
-    ...(target ? { target } : {}),
     ...(typeFilter ? { type: typeFilter } : {}),
-    ...(categoryFilter ? { category: categoryFilter } : {}),
-    ...(tagFilter ? { tag: tagFilter } : {}),
-    ...(installState ? { installState } : {}),
   });
 
-  const readyForInstall = Boolean(workspaceFilePath && target);
-  const selectedWorkspace = useMemo(
-    () => workspaceRegistry.data?.find((entry) => entry.filePath === workspaceFilePath) ?? null,
-    [workspaceRegistry.data, workspaceFilePath],
-  );
-  const selectedVisible = useMemo(
-    () => selected.filter((name) => catalog.data?.items.some((item) => item.name === name)),
-    [catalog.data?.items, selected],
-  );
-
-  const handleWorkspaceChange = (value: string) => {
-    setWorkspaceFilePath(value);
-    setTarget('');
-    setInstallState('');
-    setSelected([]);
-  };
-
-  const handleTargetChange = (value: DeployTarget) => {
-    setTarget(value);
-    setInstallState('');
-    setSelected([]);
-  };
-
-  const toggleSelect = (name: string) => {
-    if (!readyForInstall) {
-      return;
-    }
-
-    setSelected((prev) =>
-      prev.includes(name) ? prev.filter((entry) => entry !== name) : [...prev, name],
-    );
+  const toggleWorkspace = (filePath: string) => {
+    setExpandedWorkspaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(filePath)) {
+        next.delete(filePath);
+      } else {
+        next.add(filePath);
+      }
+      return next;
+    });
   };
 
   return (
@@ -92,23 +109,35 @@ export function SkillsPage() {
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-2xl font-semibold text-gray-900">Catalogo de skills</h1>
+            <h1 className="text-2xl font-semibold text-gray-900">Hub de skills</h1>
             <p className="mt-1 text-sm text-gray-500">
-              Explore a base unica de skills da nuvem, escolha um workspace e um agente, e instale
-              apenas o que fizer sentido naquele destino.
+              A nuvem continua sendo a base oficial, mas a operacao agora acontece aqui:
+              veja workspaces por agente, compare divergencias, baixe, suba, copie e mova
+              skills sem sair desta tela.
             </p>
           </div>
-          <button
-            onClick={() => setShowInstallDialog(true)}
-            disabled={!readyForInstall || selected.length === 0}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            <Download className="h-4 w-4" />
-            Instalar ({selected.length})
-          </button>
+          {hub.data && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <SummaryCard
+                title="Skills na nuvem"
+                value={hub.data.cloud.total}
+                hint="Inventario oficial do provider"
+              />
+              <SummaryCard
+                title="Workspaces"
+                value={hub.data.workspaces.length}
+                hint="Projetos registrados no Agent Hub"
+              />
+              <SummaryCard
+                title="Divergencias"
+                value={hub.data.workspaces.reduce((sum, workspace) => sum + workspace.counts.diverged, 0)}
+                hint="Skills que exigem comparacao antes de sobrescrever"
+              />
+            </div>
+          )}
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px]">
+        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
           <SearchBar
             value={query}
             onChange={setQuery}
@@ -120,241 +149,996 @@ export function SkillsPage() {
             onChange={(value) => setTypeFilter(value as typeof typeFilter)}
             options={[
               { value: '', label: 'Todos os tipos' },
-              ...(catalog.data?.availableFilters.types ?? []).map((value) => ({
-                value,
-                label: value,
-              })),
-            ]}
-          />
-          <SelectField
-            label="Categoria"
-            value={categoryFilter}
-            onChange={setCategoryFilter}
-            options={[
-              { value: '', label: 'Todas as categorias' },
-              ...(catalog.data?.availableFilters.categories ?? []).map((value) => ({
-                value,
-                label: value,
-              })),
-            ]}
-          />
-          <SelectField
-            label="Tag"
-            value={tagFilter}
-            onChange={setTagFilter}
-            options={[
-              { value: '', label: 'Todas as tags' },
-              ...(catalog.data?.availableFilters.tags ?? []).map((value) => ({
+              ...(hub.data?.cloud.availableFilters.types ?? []).map((value) => ({
                 value,
                 label: value,
               })),
             ]}
           />
         </div>
-
-        <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-          <div className="flex items-center gap-2">
-            <FolderKanban className="h-4 w-4 text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-900">Destino da instalacao</h2>
-          </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_180px]">
-            <SelectField
-              label="Workspace"
-              value={workspaceFilePath}
-              onChange={handleWorkspaceChange}
-              options={[
-                { value: '', label: 'Selecione um workspace' },
-                ...(workspaceRegistry.data ?? []).map((entry) => ({
-                  value: entry.filePath,
-                  label: entry.manifest?.name?.trim() || lastPathSegment(entry.workspaceDir),
-                })),
-              ]}
-            />
-
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Agente</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {TARGETS.map((entry) => (
-                  <button
-                    key={entry.value}
-                    onClick={() => handleTargetChange(entry.value)}
-                    disabled={!workspaceFilePath}
-                    className={cn(
-                      'rounded-lg border-2 px-3 py-1.5 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50',
-                      target === entry.value ? entry.className : 'border-gray-200 bg-white text-gray-400',
-                    )}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <SelectField
-              label="Estado no destino"
-              value={installState}
-              onChange={(value) => setInstallState(value as typeof installState)}
-              disabled={!readyForInstall}
-              options={[
-                { value: '', label: 'Todos os estados' },
-                { value: 'installed', label: 'Instalada' },
-                { value: 'not_installed', label: 'Nao instalada' },
-              ]}
-            />
-          </div>
-
-          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-3 text-sm">
-            {readyForInstall ? (
-              <>
-                <p className="font-medium text-gray-900">
-                  Destino atual: {selectedWorkspace?.manifest?.name?.trim() || lastPathSegment(selectedWorkspace?.workspaceDir ?? '')}
-                </p>
-                <p className="mt-1 text-gray-500">
-                  Agente selecionado: {TARGETS.find((entry) => entry.value === target)?.label}
-                </p>
-              </>
-            ) : (
-              <p className="text-gray-500">
-                Escolha primeiro um workspace e depois um agente. So depois disso a selecao em lote
-                e a instalacao ficam habilitadas.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {catalog.data && (
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <SummaryCard
-              title="Skills no catalogo"
-              value={catalog.data.total}
-              hint="Resultado apos os filtros globais da nuvem"
-            />
-            <SummaryCard
-              title="Categorias"
-              value={catalog.data.availableFilters.categories.length}
-              hint="Categorias disponiveis no catalogo atual"
-            />
-            <SummaryCard
-              title={readyForInstall ? 'Instaladas no destino' : 'Selecao em lote'}
-              value={readyForInstall ? catalog.data.counts.installed : selected.length}
-              hint={
-                readyForInstall
-                  ? 'Quantidade ja presente no workspace/agente escolhidos'
-                  : 'Selecione um destino para liberar a instalacao'
-              }
-            />
-          </div>
-        )}
       </section>
 
-      {catalog.isLoading && (
-        <LoadingSpinner className="py-16" size="lg" label="Carregando catalogo..." />
+      {hub.isLoading && (
+        <LoadingSpinner className="py-20" size="lg" label="Carregando hub de skills..." />
       )}
 
-      {catalog.error && (
+      {hub.error && (
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          {catalog.error instanceof Error ? catalog.error.message : 'Nao foi possivel carregar o catalogo'}
+          {hub.error instanceof Error ? hub.error.message : 'Nao foi possivel carregar o hub de skills'}
         </div>
       )}
 
-      {!catalog.isLoading && !catalog.error && catalog.data && catalog.data.items.length === 0 && (
-        <EmptyState
-          icon={<BookOpen className="h-12 w-12" />}
-          title="Nenhuma skill encontrada"
-          description="Ajuste os filtros ou escolha outro destino para continuar."
-        />
-      )}
+      {!hub.isLoading && !hub.error && hub.data && (
+        <>
+          <CloudAccordionSection
+            cloudItems={hub.data.cloud.items}
+            workspaces={hub.data.workspaces}
+            expanded={expandedCloud}
+            onToggle={() => setExpandedCloud((value) => !value)}
+          />
 
-      {!catalog.isLoading && !catalog.error && catalog.data && catalog.data.items.length > 0 && (
-        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {catalog.data.items.map((item) => (
-            <SkillCatalogCard
-              key={item.name}
-              item={item}
-              readyForInstall={readyForInstall}
-              selected={selected.includes(item.name)}
-              onToggleSelect={() => toggleSelect(item.name)}
+          {hub.data.workspaces.length === 0 ? (
+            <EmptyState
+              icon={<FolderKanban className="h-12 w-12" />}
+              title="Nenhum workspace registrado"
+              description="Cadastre um workspace em /workspace para operar skills locais aqui."
             />
-          ))}
-        </section>
-      )}
-
-      {showInstallDialog && (
-        <DeployDialog
-          skillNames={selectedVisible.length > 0 ? selectedVisible : selected}
-          initialWorkspaceFilePath={workspaceFilePath || undefined}
-          initialTarget={target || undefined}
-          lockDestination
-          onClose={() => setShowInstallDialog(false)}
-        />
+          ) : (
+            <section className="space-y-4">
+              {hub.data.workspaces.map((workspace) => (
+                <WorkspaceAccordionSection
+                  key={workspace.filePath}
+                  summary={workspace}
+                  allWorkspaces={hub.data.workspaces}
+                  expanded={expandedWorkspaces.has(workspace.filePath)}
+                  onToggle={() => toggleWorkspace(workspace.filePath)}
+                />
+              ))}
+            </section>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function SkillCatalogCard({
-  item,
-  readyForInstall,
-  selected,
-  onToggleSelect,
+function CloudAccordionSection({
+  cloudItems,
+  workspaces,
+  expanded,
+  onToggle,
 }: {
-  item: CloudSkillCatalogItem;
-  readyForInstall: boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
+  cloudItems: SkillsHubCloudItem[];
+  workspaces: SkillsHubWorkspaceSummary[];
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const installStateMeta = INSTALL_STATE_META[item.installState];
+  const [selected, setSelected] = useState<string[]>([]);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+
+  const selectedNames = useMemo(
+    () => selected.filter((name) => cloudItems.some((item) => item.name === name)),
+    [cloudItems, selected],
+  );
+
+  const toggleSelection = (name: string) => {
+    setSelected((prev) => (
+      prev.includes(name)
+        ? prev.filter((entry) => entry !== name)
+        : [...prev, name]
+    ));
+  };
+
+  const openSingleDownload = (name: string) => {
+    setSelected([name]);
+    setShowDownloadDialog(true);
+  };
 
   return (
-    <div className="relative rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-brand-300 hover:shadow-md">
-      <input
-        type="checkbox"
-        checked={selected}
-        disabled={!readyForInstall}
-        onChange={onToggleSelect}
-        className="absolute right-3 top-3 z-10 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 disabled:opacity-50"
-      />
+    <section className="rounded-2xl border border-gray-200 bg-white">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-2">
+            <Cloud className="h-5 w-5 text-sky-700" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-gray-900">Nuvem</h2>
+            <p className="text-sm text-gray-500">
+              {cloudItems.length} skill{cloudItems.length === 1 ? '' : 's'} disponivel{cloudItems.length === 1 ? '' : 'eis'} no provider oficial
+            </p>
+          </div>
+        </div>
 
-      <div className="flex items-start gap-2">
-        <BookOpen className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
-        <div className="min-w-0 flex-1 pr-7">
-          <Link
-            to={`/skills/${encodeURIComponent(item.name)}`}
-            className="truncate text-sm font-semibold text-gray-900 hover:text-brand-700"
-          >
-            {item.name}
-          </Link>
-          {item.description && (
-            <p className="mt-2 line-clamp-3 text-sm text-gray-500">{item.description}</p>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
+            {cloudItems.reduce((sum, item) => sum + item.workspaceUsageCount, 0)} instalada{cloudItems.reduce((sum, item) => sum + item.workspaceUsageCount, 0) === 1 ? '' : 's'}
+          </span>
+          <ChevronDown className={cn('h-4 w-4 text-gray-400 transition-transform', expanded && 'rotate-180')} />
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-200 px-5 py-4">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <p className="text-sm text-gray-500">
+              Expanda a nuvem para descobrir novas skills e baixar para qualquer workspace/agente.
+            </p>
+            <button
+              onClick={() => setShowDownloadDialog(true)}
+              disabled={selectedNames.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Baixar para... ({selectedNames.length})
+            </button>
+          </div>
+
+          {cloudItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-sm text-gray-500">
+              Nenhuma skill encontrada com os filtros atuais.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {cloudItems.map((item) => (
+                <div
+                  key={item.name}
+                  className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                >
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedNames.includes(item.name)}
+                          onChange={() => toggleSelection(item.name)}
+                          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                        />
+                        <Link
+                          to={`/skills/${encodeURIComponent(item.name)}`}
+                          className="truncate text-sm font-semibold text-gray-900 hover:text-brand-700"
+                        >
+                          {item.name}
+                        </Link>
+                        <span className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                          {item.type}
+                        </span>
+                        {item.category && (
+                          <span className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200">
+                            {item.category}
+                          </span>
+                        )}
+                      </div>
+                      {item.description && (
+                        <p className="mt-2 text-sm text-gray-500">{item.description}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {item.tags.slice(0, 4).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                        {item.workspaceUsageCount} workspace{item.workspaceUsageCount === 1 ? '' : 's'}
+                      </span>
+                      {item.divergedWorkspaceCount > 0 && (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                          {item.divergedWorkspaceCount} divergente{item.divergedWorkspaceCount === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => openSingleDownload(item.name)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Baixar para...
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
+        </div>
+      )}
+
+      {showDownloadDialog && (
+        <DownloadToWorkspaceDialog
+          skills={selectedNames}
+          workspaces={workspaces}
+          onClose={() => setShowDownloadDialog(false)}
+        />
+      )}
+    </section>
+  );
+}
+
+function WorkspaceAccordionSection({
+  summary,
+  allWorkspaces,
+  expanded,
+  onToggle,
+}: {
+  summary: SkillsHubWorkspaceSummary;
+  allWorkspaces: SkillsHubWorkspaceSummary[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const detail = useSkillsHubWorkspace(expanded ? summary.filePath : null);
+
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-lg font-semibold text-gray-900">{summary.workspaceName}</h2>
+            {summary.isActive && (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                Ativo
+              </span>
+            )}
+          </div>
+          <p className="mt-1 truncate font-mono text-xs text-gray-500">{summary.workspaceDir}</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <StatusCountBadge label="Sync" value={summary.counts.synced} tone="emerald" />
+          <StatusCountBadge label="Nuvem" value={summary.counts.cloud_only} tone="sky" />
+          <StatusCountBadge label="Local" value={summary.counts.local_only} tone="slate" />
+          {summary.counts.diverged > 0 && (
+            <StatusCountBadge label="Diff" value={summary.counts.diverged} tone="amber" />
+          )}
+          {summary.counts.missing_in_provider > 0 && (
+            <StatusCountBadge label="Ausente" value={summary.counts.missing_in_provider} tone="red" />
+          )}
+          <ChevronDown className={cn('h-4 w-4 text-gray-400 transition-transform', expanded && 'rotate-180')} />
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-200 px-5 py-4">
+          {detail.isLoading ? (
+            <LoadingSpinner className="py-12" size="md" label="Carregando workspace..." />
+          ) : detail.error ? (
+            <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+              {detail.error instanceof Error ? detail.error.message : 'Nao foi possivel carregar o workspace'}
+            </div>
+          ) : detail.data ? (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <SummaryCard title="Sincronizadas" value={detail.data.counts.synced} hint="Mesma versao local e nuvem" />
+                <SummaryCard title="So na nuvem" value={detail.data.counts.cloud_only} hint="Pode baixar sem comparar" />
+                <SummaryCard title="So local" value={detail.data.counts.local_only} hint="Candidatas a upload" />
+                <SummaryCard title="Divergentes" value={detail.data.counts.diverged} hint="Exigem comparacao antes de sobrescrever" />
+              </div>
+
+              {detail.data.agents.map((agent) => (
+                <AgentSection
+                  key={`${detail.data!.filePath}-${agent.target}`}
+                  workspace={summary}
+                  agent={agent}
+                  allWorkspaces={allWorkspaces}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AgentSection({
+  workspace,
+  agent,
+  allWorkspaces,
+}: {
+  workspace: SkillsHubWorkspaceSummary;
+  agent: SkillsHubWorkspaceAgentDetail;
+  allWorkspaces: SkillsHubWorkspaceSummary[];
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [transferDialog, setTransferDialog] = useState<TransferDialogState>(null);
+  const [compareSkill, setCompareSkill] = useState<string | null>(null);
+  const uploadMutation = useSkillsHubUpload();
+
+  const selectedSkills = useMemo(
+    () => agent.skills.filter((skill) => selected.includes(skill.name)),
+    [agent.skills, selected],
+  );
+  const hasDivergedSelection = selectedSkills.some((skill) => skill.status === 'diverged');
+
+  const toggleSelection = (name: string) => {
+    setSelected((prev) => (
+      prev.includes(name)
+        ? prev.filter((entry) => entry !== name)
+        : [...prev, name]
+    ));
+  };
+
+  const handleBatchUpload = () => {
+    if (selectedSkills.length === 0) {
+      return;
+    }
+    if (hasDivergedSelection) {
+      toast.error('Compare cada skill divergente individualmente antes de subir para a nuvem.');
+      return;
+    }
+
+    uploadMutation.mutate(
+      {
+        filePath: workspace.filePath,
+        target: agent.target,
+        skills: selectedSkills.map((skill) => skill.name),
+      },
+      {
+        onSuccess: (result) => {
+          toastForActionResult(result, 'Upload concluido');
+          setSelected([]);
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir as skills');
+        },
+      },
+    );
+  };
+
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', TARGET_META[agent.target].className)}>
+              {agent.label}
+            </span>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-gray-600 ring-1 ring-inset ring-gray-200">
+              {agent.skills.length} skill{agent.skills.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <p className="mt-2 break-all font-mono text-xs text-gray-500">{agent.skillPath}</p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setShowDownloadDialog(true)}
+            disabled={selectedSkills.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            Baixar ({selectedSkills.length})
+          </button>
+          <button
+            onClick={handleBatchUpload}
+            disabled={selectedSkills.length === 0 || uploadMutation.isPending}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white disabled:opacity-50"
+          >
+            <Upload className="h-4 w-4" />
+            Subir para nuvem
+          </button>
+          <button
+            onClick={() => setTransferDialog({
+              mode: 'copy',
+              skills: selectedSkills.map((skill) => skill.name),
+              sourceWorkspaceFilePath: workspace.filePath,
+              sourceTarget: agent.target,
+            })}
+            disabled={selectedSkills.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white disabled:opacity-50"
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Copiar para...
+          </button>
+          <button
+            onClick={() => setTransferDialog({
+              mode: 'move',
+              skills: selectedSkills.map((skill) => skill.name),
+              sourceWorkspaceFilePath: workspace.filePath,
+              sourceTarget: agent.target,
+            })}
+            disabled={selectedSkills.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-white disabled:opacity-50"
+          >
+            <MoveRight className="h-4 w-4" />
+            Mover para...
+          </button>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-1.5">
-        <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-          {item.type}
-        </span>
-        {item.category && (
-          <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
-            {item.category}
-          </span>
-        )}
-        {item.tags.slice(0, 3).map((tag) => (
-          <span
-            key={tag}
-            className="rounded bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
-          >
-            {tag}
-          </span>
-        ))}
+      {hasDivergedSelection && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          O upload em lote ignora sobrescrita automatica. Compare cada skill divergente individualmente antes de confirmar.
+        </div>
+      )}
+
+      {agent.skills.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-8 text-sm text-gray-500">
+          Nenhuma skill detectada para este agente.
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {agent.skills.map((skill) => (
+            <div key={`${workspace.filePath}-${agent.target}-${skill.name}`} className="rounded-2xl border border-gray-200 bg-white p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(skill.name)}
+                      onChange={() => toggleSelection(skill.name)}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="truncate text-sm font-semibold text-gray-900">{skill.name}</span>
+                    <StatusBadge status={skill.status} />
+                    {skill.type && (
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                        {skill.type}
+                      </span>
+                    )}
+                    {skill.inManifest ? (
+                      <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                        no manifesto
+                      </span>
+                    ) : (
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                        fora do manifesto
+                      </span>
+                    )}
+                  </div>
+
+                  {skill.description && (
+                    <p className="mt-2 text-sm text-gray-500">{skill.description}</p>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {skill.tags.slice(0, 4).map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                    {skill.warning && (
+                      <span className="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        sync com aviso
+                      </span>
+                    )}
+                  </div>
+
+                  {skill.localPaths.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {skill.localPaths.map((localPath) => (
+                        <p key={localPath} className="break-all font-mono text-xs text-gray-500">
+                          {localPath}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {(skill.status === 'cloud_only') && (
+                    <button
+                      onClick={() => {
+                        setSelected([skill.name]);
+                        setShowDownloadDialog(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Baixar
+                    </button>
+                  )}
+
+                  {skill.status === 'diverged' ? (
+                    <button
+                      onClick={() => setCompareSkill(skill.name)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                    >
+                      <GitCompare className="h-3.5 w-3.5" />
+                      Comparar
+                    </button>
+                  ) : skill.installedLocally ? (
+                    <button
+                      onClick={() => {
+                        uploadMutation.mutate(
+                          { filePath: workspace.filePath, target: agent.target, skills: [skill.name] },
+                          {
+                            onSuccess: (result) => toastForActionResult(result, 'Upload concluido'),
+                            onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir a skill'),
+                          },
+                        );
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      Subir
+                    </button>
+                  ) : null}
+
+                  {skill.installedLocally && (
+                    <>
+                      <button
+                        onClick={() => setTransferDialog({
+                          mode: 'copy',
+                          skills: [skill.name],
+                          sourceWorkspaceFilePath: workspace.filePath,
+                          sourceTarget: agent.target,
+                        })}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                        Copiar
+                      </button>
+                      <button
+                        onClick={() => setTransferDialog({
+                          mode: 'move',
+                          skills: [skill.name],
+                          sourceWorkspaceFilePath: workspace.filePath,
+                          sourceTarget: agent.target,
+                        })}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <MoveRight className="h-3.5 w-3.5" />
+                        Mover
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showDownloadDialog && (
+        <DownloadToWorkspaceDialog
+          skills={selectedSkills.length > 0 ? selectedSkills.map((skill) => skill.name) : []}
+          workspaces={allWorkspaces}
+          initialFilePath={workspace.filePath}
+          initialTarget={agent.target}
+          lockDestination
+          onClose={() => setShowDownloadDialog(false)}
+        />
+      )}
+
+      {transferDialog && (
+        <TransferDialog
+          state={transferDialog}
+          workspaces={allWorkspaces}
+          onClose={() => setTransferDialog(null)}
+        />
+      )}
+
+      {compareSkill && (
+        <CompareDialog
+          filePath={workspace.filePath}
+          workspaceName={workspace.workspaceName}
+          target={agent.target}
+          skillName={compareSkill}
+          onClose={() => setCompareSkill(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function DownloadToWorkspaceDialog({
+  skills,
+  workspaces,
+  initialFilePath,
+  initialTarget,
+  lockDestination = false,
+  onClose,
+}: {
+  skills: string[];
+  workspaces: SkillsHubWorkspaceSummary[];
+  initialFilePath?: string;
+  initialTarget?: DeployTarget;
+  lockDestination?: boolean;
+  onClose: () => void;
+}) {
+  const [filePath, setFilePath] = useState(initialFilePath ?? '');
+  const [target, setTarget] = useState<DeployTarget | ''>(initialTarget ?? '');
+  const mutation = useSkillsHubDownload();
+  const selectedWorkspace = workspaces.find((workspace) => workspace.filePath === filePath) ?? null;
+
+  const handleConfirm = () => {
+    if (!filePath || !target || skills.length === 0) {
+      toast.error('Selecione um workspace, um agente e pelo menos uma skill.');
+      return;
+    }
+
+    mutation.mutate(
+      { filePath, target, skills },
+      {
+        onSuccess: (result) => {
+          toastForActionResult(result, 'Download concluido');
+          onClose();
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar as skills');
+        },
+      },
+    );
+  };
+
+  return (
+    <ModalShell title="Baixar skills para workspace" onClose={onClose}>
+      <p className="text-sm text-gray-500">
+        A operacao adiciona o target ao manifesto e faz deploy imediato da versao da nuvem.
+      </p>
+
+      <SkillChipRow skills={skills} className="mt-4" />
+
+      {lockDestination ? (
+        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Destino</p>
+          <p className="mt-2 text-sm font-semibold text-gray-900">{selectedWorkspace?.workspaceName}</p>
+          <p className="mt-1 text-xs text-gray-500">{selectedWorkspace?.workspaceDir}</p>
+          {target && (
+            <span className={cn('mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold', TARGET_META[target].className)}>
+              {TARGET_META[target].label}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <SelectField
+            label="Workspace"
+            value={filePath}
+            onChange={setFilePath}
+            options={[
+              { value: '', label: 'Selecione um workspace' },
+              ...workspaces.map((workspace) => ({
+                value: workspace.filePath,
+                label: workspace.workspaceName,
+              })),
+            ]}
+          />
+          <TargetSelector target={target} onChange={setTarget} />
+        </div>
+      )}
+
+      <ModalActions
+        confirmLabel={mutation.isPending ? 'Baixando...' : 'Baixar agora'}
+        onClose={onClose}
+        onConfirm={handleConfirm}
+        confirmDisabled={mutation.isPending || !filePath || !target || skills.length === 0}
+      />
+    </ModalShell>
+  );
+}
+
+function TransferDialog({
+  state,
+  workspaces,
+  onClose,
+}: {
+  state: NonNullable<TransferDialogState>;
+  workspaces: SkillsHubWorkspaceSummary[];
+  onClose: () => void;
+}) {
+  const [destinationWorkspaceFilePath, setDestinationWorkspaceFilePath] = useState('');
+  const [destinationTarget, setDestinationTarget] = useState<DeployTarget | ''>('');
+  const mutation = useSkillsHubTransfer();
+
+  const handleConfirm = () => {
+    if (!destinationWorkspaceFilePath || !destinationTarget) {
+      toast.error('Selecione o workspace e o agente de destino.');
+      return;
+    }
+
+    mutation.mutate(
+      {
+        sourceWorkspaceFilePath: state.sourceWorkspaceFilePath,
+        sourceTarget: state.sourceTarget,
+        destinationWorkspaceFilePath,
+        destinationTarget,
+        skills: state.skills,
+        mode: state.mode,
+      },
+      {
+        onSuccess: (result) => {
+          toastForActionResult(result, state.mode === 'move' ? 'Movimentacao concluida' : 'Copia concluida');
+          onClose();
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel transferir as skills');
+        },
+      },
+    );
+  };
+
+  return (
+    <ModalShell
+      title={state.mode === 'move' ? 'Mover skills' : 'Copiar skills'}
+      onClose={onClose}
+    >
+      <p className="text-sm text-gray-500">
+        {state.mode === 'move'
+          ? 'Mover copia para o destino, remove o target da origem e faz undeploy do agente original.'
+          : 'Copiar preserva a origem e adiciona o target no destino.'}
+      </p>
+
+      <SkillChipRow skills={state.skills} className="mt-4" />
+
+      <div className="mt-4 space-y-4">
+        <SelectField
+          label="Workspace de destino"
+          value={destinationWorkspaceFilePath}
+          onChange={setDestinationWorkspaceFilePath}
+          options={[
+            { value: '', label: 'Selecione um workspace' },
+            ...workspaces.map((workspace) => ({
+              value: workspace.filePath,
+              label: workspace.workspaceName,
+            })),
+          ]}
+        />
+        <TargetSelector target={destinationTarget} onChange={setDestinationTarget} />
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="text-xs text-gray-400">{item.fileCount} arquivo{item.fileCount === 1 ? '' : 's'}</span>
-        <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-semibold', installStateMeta.className)}>
-          {installStateMeta.label}
-        </span>
+      <ModalActions
+        confirmLabel={mutation.isPending ? 'Enviando...' : state.mode === 'move' ? 'Mover agora' : 'Copiar agora'}
+        onClose={onClose}
+        onConfirm={handleConfirm}
+        confirmDisabled={mutation.isPending || !destinationWorkspaceFilePath || !destinationTarget}
+      />
+    </ModalShell>
+  );
+}
+
+function CompareDialog({
+  filePath,
+  workspaceName,
+  target,
+  skillName,
+  onClose,
+}: {
+  filePath: string;
+  workspaceName: string;
+  target: DeployTarget;
+  skillName: string;
+  onClose: () => void;
+}) {
+  const diff = useSkillsHubDiff({ filePath, target, name: skillName });
+  const uploadMutation = useSkillsHubUpload();
+  const downloadMutation = useSkillsHubDownload();
+
+  const result = diff.data;
+
+  const handleUpload = () => {
+    uploadMutation.mutate(
+      { filePath, target, skills: [skillName], force: true },
+      {
+        onSuccess: (mutationResult) => {
+          toastForActionResult(mutationResult, 'Upload concluido');
+          onClose();
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir a skill');
+        },
+      },
+    );
+  };
+
+  const handleDownload = () => {
+    downloadMutation.mutate(
+      { filePath, target, skills: [skillName] },
+      {
+        onSuccess: (mutationResult) => {
+          toastForActionResult(mutationResult, 'Download concluido');
+          onClose();
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar a skill');
+        },
+      },
+    );
+  };
+
+  return (
+    <ModalShell title={`Comparar ${skillName}`} onClose={onClose} size="6xl">
+      {diff.isLoading ? (
+        <LoadingSpinner className="py-14" size="md" label="Montando comparacao..." />
+      ) : diff.error ? (
+        <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+          {diff.error instanceof Error ? diff.error.message : 'Nao foi possivel montar a comparacao'}
+        </div>
+      ) : result ? (
+        <>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={result.status} />
+              <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', TARGET_META[target].className)}>
+                {workspaceName} · {TARGET_META[target].label}
+              </span>
+            </div>
+            {result.warning && (
+              <p className="mt-3 text-sm text-amber-700">{result.warning}</p>
+            )}
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <ComparePane title="Local" side={result.local} emptyLabel="Nenhuma versao local encontrada." />
+            <ComparePane title="Nuvem" side={result.cloud} emptyLabel="Nenhuma versao encontrada no provider." />
+          </div>
+
+          <div className="mt-5 flex flex-wrap justify-end gap-3">
+            {result.canDownload && (
+              <button
+                onClick={handleDownload}
+                disabled={downloadMutation.isPending}
+                className="inline-flex items-center gap-2 rounded-lg border border-brand-300 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                {downloadMutation.isPending ? 'Baixando...' : 'Baixar da nuvem'}
+              </button>
+            )}
+            {result.canUpload && (
+              <button
+                onClick={handleUpload}
+                disabled={uploadMutation.isPending}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                <Upload className="h-4 w-4" />
+                {uploadMutation.isPending ? 'Subindo...' : 'Subir para nuvem'}
+              </button>
+            )}
+          </div>
+        </>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function ComparePane({
+  title,
+  side,
+  emptyLabel,
+}: {
+  title: string;
+  side: SkillsHubDiffResult['local'];
+  emptyLabel: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white">
+      <div className="border-b border-gray-200 px-4 py-3">
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        {side.detectedPath && (
+          <p className="mt-1 break-all font-mono text-xs text-gray-500">{side.detectedPath}</p>
+        )}
       </div>
+      <div className="p-4">
+        {!side.exists || !side.preview ? (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-sm text-gray-500">
+            {emptyLabel}
+          </div>
+        ) : (
+          <pre className="max-h-[24rem] overflow-auto rounded-xl bg-gray-950 p-4 text-xs text-gray-100">
+            {side.preview}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ModalShell({
+  title,
+  children,
+  onClose,
+  size = '2xl',
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  size?: '2xl' | '6xl';
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className={cn('w-full rounded-2xl bg-white p-6 shadow-xl', size === '6xl' ? 'max-w-6xl' : 'max-w-2xl')}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-sm font-medium text-gray-500 hover:text-gray-700">
+            Fechar
+          </button>
+        </div>
+        <div className="mt-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ModalActions({
+  confirmLabel,
+  onClose,
+  onConfirm,
+  confirmDisabled = false,
+}: {
+  confirmLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  confirmDisabled?: boolean;
+}) {
+  return (
+    <div className="mt-6 flex justify-end gap-3">
+      <button
+        onClick={onClose}
+        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      >
+        Cancelar
+      </button>
+      <button
+        onClick={onConfirm}
+        disabled={confirmDisabled}
+        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+      >
+        {confirmLabel}
+      </button>
+    </div>
+  );
+}
+
+function TargetSelector({
+  target,
+  onChange,
+}: {
+  target: DeployTarget | '';
+  onChange: (target: DeployTarget) => void;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Agente</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {(Object.keys(TARGET_META) as DeployTarget[]).map((value) => (
+          <button
+            key={value}
+            onClick={() => onChange(value)}
+            className={cn(
+              'rounded-lg border-2 px-3 py-1.5 text-sm font-medium transition-all',
+              target === value ? TARGET_META[value].className : 'border-gray-200 bg-white text-gray-400',
+            )}
+          >
+            {TARGET_META[value].label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkillChipRow({
+  skills,
+  className,
+}: {
+  skills: string[];
+  className?: string;
+}) {
+  return (
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {skills.map((skill) => (
+        <span
+          key={skill}
+          className="rounded bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
+        >
+          {skill}
+        </span>
+      ))}
     </div>
   );
 }
@@ -380,30 +1164,58 @@ function SummaryCard({
   );
 }
 
+function StatusBadge({ status }: { status: SkillsHubStatus }) {
+  const meta = STATUS_META[status];
+
+  return (
+    <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-semibold', meta.className)}>
+      {meta.label}
+    </span>
+  );
+}
+
+function StatusCountBadge({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'emerald' | 'sky' | 'slate' | 'amber' | 'red';
+}) {
+  const className: Record<typeof tone, string> = {
+    emerald: 'bg-emerald-100 text-emerald-700',
+    sky: 'bg-sky-100 text-sky-700',
+    slate: 'bg-slate-100 text-slate-700',
+    amber: 'bg-amber-100 text-amber-700',
+    red: 'bg-red-100 text-red-700',
+  };
+
+  return (
+    <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-semibold', className[tone])}>
+      {label}: {value}
+    </span>
+  );
+}
+
 function SelectField({
   label,
   value,
   onChange,
   options,
-  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
-  disabled?: boolean;
 }) {
   return (
     <label className="block">
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</span>
-        <Filter className="h-3.5 w-3.5 text-gray-300" />
-      </div>
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">{label}</span>
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
       >
         {options.map((option) => (
           <option key={`${label}-${option.value}`} value={option.value}>
@@ -415,8 +1227,23 @@ function SelectField({
   );
 }
 
-function lastPathSegment(fullPath: string): string {
-  const normalized = fullPath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts.at(-1) ?? normalized;
+function toastForActionResult(result: {
+  successful: Array<{ skill: string; warning?: string }>;
+  failed: Array<{ skill: string; error: string }>;
+}, successTitle: string) {
+  if (result.failed.length === 0) {
+    const warningCount = result.successful.filter((entry) => entry.warning).length;
+    if (warningCount > 0) {
+      toast.warning(`${successTitle}: ${result.successful.length} skill(s) processada(s), com ${warningCount} aviso(s).`);
+    } else {
+      toast.success(`${successTitle}: ${result.successful.length} skill(s) processada(s).`);
+    }
+    return;
+  }
+
+  const errorPreview = result.failed
+    .slice(0, 2)
+    .map((entry) => `${entry.skill}: ${entry.error}`)
+    .join(' | ');
+  toast.warning(`${successTitle}: ${result.successful.length} sucesso(s), ${result.failed.length} falha(s). ${errorPreview}`);
 }

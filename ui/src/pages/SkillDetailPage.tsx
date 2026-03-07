@@ -120,8 +120,8 @@ export function SkillDetailPage() {
               <p className="mt-2 text-sm text-gray-500">{skillDescription}</p>
             )}
             <p className="mt-3 text-sm text-gray-500">
-              Esta e a definicao global da skill na nuvem. A instalacao sempre exige um destino
-              explicito: primeiro workspace, depois agente.
+              Esta e a definicao global da skill na nuvem. O fluxo operacional agora vive em
+              `/skills`: escolha o workspace, o agente e baixe a skill para o destino correto.
             </p>
           </div>
 
@@ -165,7 +165,7 @@ export function SkillDetailPage() {
               className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
             >
               <Rocket className="h-3.5 w-3.5" />
-              Instalar
+              Baixar para workspace
             </button>
             <button
               onClick={handleDelete}
