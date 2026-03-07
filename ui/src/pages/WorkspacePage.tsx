@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Search,
   Plus,
-  Star,
   Trash2,
   RefreshCw,
   Zap,
@@ -15,7 +13,6 @@ import {
 import { toast } from 'sonner';
 import {
   useRegisterWorkspace,
-  useSetActiveWorkspace,
   useUnregisterWorkspace,
   useWorkspace,
   useWorkspaceRegistry,
@@ -30,8 +27,6 @@ import { LoadingSpinner } from '../components/shared/LoadingSpinner';
 import { cn } from '../lib/utils';
 import type { ResolvedSkill, WorkspaceRegistryEntry, WorkspaceSuggestion } from '../api/types';
 
-type StatusFilter = 'all' | 'active' | 'inactive';
-type SkillFilter = 'all' | 'with-skills' | 'empty';
 type EditorMode = 'form' | 'raw';
 
 interface CreateDialogState {
@@ -44,14 +39,10 @@ export function WorkspacePage() {
   const registry = useWorkspaceRegistry();
   const suggestions = useWorkspaceSuggestions();
   const registerWorkspace = useRegisterWorkspace();
-  const setActiveWorkspace = useSetActiveWorkspace();
   const removeWorkspace = useUnregisterWorkspace();
   const { status, progress, result, error, startSync, reset } = useSync();
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [skillFilter, setSkillFilter] = useState<SkillFilter>('all');
   const [editorMode, setEditorMode] = useState<EditorMode>('form');
   const [dialogState, setDialogState] = useState<CreateDialogState>({ open: false });
 
@@ -87,32 +78,8 @@ export function WorkspacePage() {
     [registeredDirs, suggestions.data],
   );
 
-  const filteredEntries = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-
-    return registeredEntries.filter((entry) => {
-      if (statusFilter === 'active' && !entry.isActive) return false;
-      if (statusFilter === 'inactive' && entry.isActive) return false;
-      if (skillFilter === 'with-skills' && entry.skillCount === 0) return false;
-      if (skillFilter === 'empty' && entry.skillCount > 0) return false;
-
-      if (!normalizedQuery) return true;
-
-      const haystack = [
-        getWorkspaceName(entry),
-        entry.workspaceDir,
-        entry.filePath,
-        entry.manifest?.description ?? '',
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      return haystack.includes(normalizedQuery);
-    });
-  }, [registeredEntries, searchQuery, statusFilter, skillFilter]);
-
-  const activeCount = registeredEntries.filter((entry) => entry.isActive).length;
-  const totalSkillCount = registeredEntries.reduce((sum, entry) => sum + entry.skillCount, 0);
+  const readyCount = registeredEntries.filter((entry) => !entry.error).length;
+  const errorCount = registeredEntries.filter((entry) => Boolean(entry.error)).length;
 
   const openCreateDialog = (initialDirectory?: string, initialName?: string) => {
     setDialogState({
@@ -124,16 +91,6 @@ export function WorkspacePage() {
 
   const closeCreateDialog = () => {
     setDialogState({ open: false });
-  };
-
-  const handleActivateWorkspace = async (filePath: string) => {
-    try {
-      await setActiveWorkspace.mutateAsync(filePath);
-      setSelectedPath(filePath);
-      toast.success('Workspace ativo atualizado');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Nao foi possivel ativar o workspace');
-    }
   };
 
   const handleRemoveWorkspace = async (entry: WorkspaceRegistryEntry) => {
@@ -155,9 +112,10 @@ export function WorkspacePage() {
 
   const handleAddSuggestion = async (suggestion: WorkspaceSuggestion) => {
     try {
-      await registerWorkspace.mutateAsync({ directory: suggestion.workspaceDir });
-      toast.success('Workspace sugerido adicionado');
-      setSelectedPath(suggestion.manifestPath);
+      const result = await registerWorkspace.mutateAsync({ directory: suggestion.workspaceDir });
+      await Promise.all([registry.refetch(), suggestions.refetch()]);
+      setSelectedPath(result.registered);
+      toast.success(`Workspace "${lastPathSegment(suggestion.workspaceDir)}" adicionado a lista`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Nao foi possivel adicionar o workspace sugerido');
     }
@@ -168,16 +126,10 @@ export function WorkspacePage() {
       return;
     }
 
-    if (!selectedEntry.isActive) {
-      try {
-        await setActiveWorkspace.mutateAsync(selectedEntry.filePath);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Nao foi possivel ativar o workspace antes do sync');
-        return;
-      }
-    }
-
-    startSync(force ? { force: true } : undefined);
+    startSync({
+      ...(force ? { force: true } : {}),
+      filePath: selectedEntry.filePath,
+    });
   };
 
   if (registry.isLoading && !registry.data) {
@@ -211,60 +163,15 @@ export function WorkspacePage() {
             hint="Lista usada para gerenciar e consultar projetos locais"
           />
           <SummaryCard
-            title="Workspace ativo"
-            value={activeCount > 0 ? activeCount : 'nenhum'}
-            hint="O sync sempre usa o workspace marcado como ativo"
+            title="Prontos para uso"
+            value={readyCount}
+            hint="Workspaces sem erro de leitura e prontos para edicao ou sync"
           />
           <SummaryCard
-            title="Skills referenciadas"
-            value={totalSkillCount}
-            hint="Somatorio das skills configuradas nos workspaces registrados"
+            title="Com erro"
+            value={errorCount}
+            hint="Projetos que precisam ser revisados ou registrados novamente"
           />
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-gray-200 bg-white p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_180px_180px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por nome, descricao ou caminho"
-              className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            />
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Status
-            </span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            >
-              <option value="all">Todos</option>
-              <option value="active">Somente ativo</option>
-              <option value="inactive">Somente inativos</option>
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Skills
-            </span>
-            <select
-              value={skillFilter}
-              onChange={(e) => setSkillFilter(e.target.value as SkillFilter)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-            >
-              <option value="all">Todos</option>
-              <option value="with-skills">Com skills</option>
-              <option value="empty">Sem skills</option>
-            </select>
-          </label>
         </div>
       </section>
 
@@ -284,109 +191,80 @@ export function WorkspacePage() {
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">Lista de workspaces</h2>
                   <p className="mt-0.5 text-xs text-gray-400">
-                    {filteredEntries.length} de {registeredEntries.length} visiveis
+                    {registeredEntries.length} cadastrado{registeredEntries.length === 1 ? '' : 's'}
                   </p>
                 </div>
                 <FolderKanban className="h-4 w-4 text-gray-300" />
               </div>
 
               <div className="max-h-[70vh] space-y-3 overflow-y-auto p-4">
-                {filteredEntries.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
-                    Nenhum workspace bate com os filtros atuais.
-                  </div>
-                ) : (
-                  filteredEntries.map((entry) => {
-                    const selected = entry.filePath === selectedPath;
-                    const displayName = getWorkspaceName(entry);
-                    const targets = entry.manifest?.defaultTargets ?? [];
+                {registeredEntries.map((entry) => {
+                  const selected = entry.filePath === selectedPath;
+                  const displayName = getWorkspaceName(entry);
+                  const targets = entry.manifest?.defaultTargets ?? [];
 
-                    return (
-                      <div
-                        key={entry.filePath}
-                        className={cn(
-                          'rounded-xl border p-4 transition-colors',
-                          selected
-                            ? 'border-brand-300 bg-brand-50/40'
-                            : 'border-gray-200 bg-white hover:border-gray-300',
-                        )}
+                  return (
+                    <div
+                      key={entry.filePath}
+                      className={cn(
+                        'rounded-xl border p-4 transition-colors',
+                        selected
+                          ? 'border-brand-300 bg-brand-50/40'
+                          : 'border-gray-200 bg-white hover:border-gray-300',
+                      )}
+                    >
+                      <button
+                        onClick={() => setSelectedPath(entry.filePath)}
+                        className="w-full text-left"
                       >
-                        <button
-                          onClick={() => setSelectedPath(entry.filePath)}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h3 className="truncate text-sm font-semibold text-gray-900">{displayName}</h3>
-                                {entry.isActive && (
-                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                                    ativo
-                                  </span>
-                                )}
-                              </div>
-                              <p className="mt-1 truncate font-mono text-xs text-gray-500">
-                                {entry.workspaceDir}
-                              </p>
-                            </div>
-                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-                              {entry.skillCount} skill{entry.skillCount === 1 ? '' : 's'}
-                            </span>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-sm font-semibold text-gray-900">{displayName}</h3>
+                            <p className="mt-1 truncate font-mono text-xs text-gray-500">
+                              {entry.workspaceDir}
+                            </p>
                           </div>
-
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            {targets.length > 0 ? (
-                              targets.map((target) => (
-                                <span
-                                  key={target}
-                                  className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200"
-                                >
-                                  {target}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-inset ring-gray-200">
-                                Sem destinos padrao
-                              </span>
-                            )}
-                            {entry.error && (
-                              <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600 ring-1 ring-inset ring-red-200">
-                                Perfil com erro
-                              </span>
-                            )}
-                          </div>
-                        </button>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => setSelectedPath(entry.filePath)}
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                          >
-                            Editar
-                          </button>
-                          {!entry.isActive && (
-                            <button
-                              onClick={() => handleActivateWorkspace(entry.filePath)}
-                              disabled={setActiveWorkspace.isPending}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                            >
-                              <Star className="h-3.5 w-3.5" />
-                              Ativar
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleRemoveWorkspace(entry)}
-                            disabled={removeWorkspace.isPending}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remover
-                          </button>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                            {entry.skillCount} skill{entry.skillCount === 1 ? '' : 's'}
+                          </span>
                         </div>
+
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {targets.length > 0 ? (
+                            targets.map((target) => (
+                              <span
+                                key={target}
+                                className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200"
+                              >
+                                {target}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="rounded bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500 ring-1 ring-inset ring-gray-200">
+                              Sem destinos padrao
+                            </span>
+                          )}
+                          {entry.error && (
+                            <span className="rounded bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600 ring-1 ring-inset ring-red-200">
+                              Perfil com erro
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleRemoveWorkspace(entry)}
+                          disabled={removeWorkspace.isPending}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remover
+                        </button>
                       </div>
-                    );
-                  })
-                )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
@@ -415,20 +293,9 @@ export function WorkspacePage() {
                 <section className="rounded-2xl border border-gray-200 bg-white p-5">
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="truncate text-lg font-semibold text-gray-900">
-                          {getWorkspaceName(selectedEntry)}
-                        </h2>
-                        {selectedEntry.isActive ? (
-                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                            Workspace ativo
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-600">
-                            Inativo
-                          </span>
-                        )}
-                      </div>
+                      <h2 className="truncate text-lg font-semibold text-gray-900">
+                        {getWorkspaceName(selectedEntry)}
+                      </h2>
                       <p className="mt-1 break-all font-mono text-xs text-gray-500">
                         {selectedEntry.workspaceDir}
                       </p>
@@ -439,16 +306,6 @@ export function WorkspacePage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      {!selectedEntry.isActive && (
-                        <button
-                          onClick={() => handleActivateWorkspace(selectedEntry.filePath)}
-                          disabled={setActiveWorkspace.isPending}
-                          className="inline-flex items-center gap-2 rounded-lg border border-amber-300 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                        >
-                          <Star className="h-4 w-4" />
-                          Tornar ativo
-                        </button>
-                      )}
                       <button
                         onClick={() => handleSyncWorkspace(false)}
                         disabled={status === 'syncing'}
@@ -620,7 +477,8 @@ function EmptyWorkspaceState({
         <h2 className="mt-4 text-xl font-semibold text-gray-900">Nenhum workspace cadastrado</h2>
         <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-500">
           O gerenciamento comeca quando voce registra pastas nesta lista. Depois disso fica facil
-          buscar projetos pelo nome, definir um workspace ativo e controlar quais skills cada um usa.
+          revisar os projetos cadastrados, escolher um workspace na lista e controlar quais skills cada
+          um usa.
         </p>
         <button
           onClick={onOpenCreate}
@@ -715,6 +573,7 @@ function SuggestionPanel({
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   onClick={() => onAdd(suggestion)}
+                  disabled={loading}
                   className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
                 >
                   <Plus className="h-3.5 w-3.5" />

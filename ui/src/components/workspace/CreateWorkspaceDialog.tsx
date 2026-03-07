@@ -64,7 +64,7 @@ export function CreateWorkspaceDialog({
             <div>
               <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
                 Nome de exibicao <span className="text-gray-400">(opcional)</span>
-                <HoverHint text="Use um nome generico, como Projeto principal, para facilitar a busca quando houver muitos workspaces." />
+                <HoverHint text="Use um nome generico, como Projeto principal, para identificar este workspace com facilidade na lista." />
               </label>
               <input
                 type="text"

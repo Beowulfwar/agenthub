@@ -26,15 +26,16 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 
 1. Workspace e sempre um diretorio de projeto registrado pelo usuario.
 2. A UI de `/workspace` mostra e edita apenas workspaces registrados; pastas fora da lista nao exibem skills nem detalhes.
-3. O usuario pode alternar entre workspaces sem apagar os demais.
-4. O projeto pode existir mesmo com `skills: []` ou sem skills locais detectadas.
-5. `ahub.workspace.json` descreve o que sera sincronizado para o projeto; ele nao armazena os pacotes remotos em si.
-6. A UI deve explicitar o diretorio do projeto e esconder o conceito de manifest como detalhe de implementacao, sempre que possivel.
-7. Para cada target suportado, a UI deve mostrar o diretorio reconhecido que sera usado pelo sync.
-8. Quando nao houver workspaces cadastrados, a UI deve sugerir pastas a partir de skills locais encontradas em estruturas conhecidas como `.skills`, `.codex`, `.claude` e `.cursor`.
-9. O fluxo de selecao de pasta deve ser guiado por navegacao visual e sugestoes; a UI nao deve depender de digitacao manual de caminhos.
-10. Campos que exigem contexto extra devem usar ajuda contextual discreta (tooltip/hover hint), em vez de espalhar textos longos pela tela.
-11. Precedencia de diretorio de deploy por target:
+3. A lista principal de `/workspace` exibe todos os workspaces cadastrados sem filtros locais de busca, status ou quantidade de skills.
+4. O card selecionado na lista vira o contexto de edicao e sync dentro da tela; o usuario nao precisa acionar um botao extra de “tornar ativo”.
+5. O projeto pode existir mesmo com `skills: []` ou sem skills locais detectadas.
+6. `ahub.workspace.json` descreve o que sera sincronizado para o projeto; ele nao armazena os pacotes remotos em si.
+7. A UI deve explicitar o diretorio do projeto e esconder o conceito de manifest como detalhe de implementacao, sempre que possivel.
+8. Para cada target suportado, a UI deve mostrar o diretorio reconhecido que sera usado pelo sync.
+9. Quando nao houver workspaces cadastrados, a UI deve sugerir pastas a partir de skills locais encontradas em estruturas conhecidas como `.skills`, `.codex`, `.claude` e `.cursor`.
+10. O fluxo de selecao de pasta deve ser guiado por navegacao visual e sugestoes; a UI nao deve depender de digitacao manual de caminhos.
+11. Campos que exigem contexto extra devem usar ajuda contextual discreta (tooltip/hover hint), em vez de espalhar textos longos pela tela.
+12. Precedencia de diretorio de deploy por target:
    - `config.deployTargets[target]`
    - raiz local do workspace ativo (ex.: `project/.codex`)
    - padrao nativo da ferramenta quando nao houver workspace selecionado
@@ -46,6 +47,18 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 - **Given**: O usuario registra `/repos/app-a`, `/repos/app-b` e `/repos/app-c`
 - **When**: Abre o seletor de workspace
 - **Then**: Os 3 projetos aparecem como workspaces independentes, com um ativo por vez
+
+### Cenario: Selecionar um card para editar
+
+- **Given**: Existem varios workspaces na lista
+- **When**: O usuario clica no card de um workspace
+- **Then**: O painel lateral abre os dados desse item para edicao e sync, sem precisar clicar em um botao `Editar`
+
+### Cenario: Lista completa sem filtros locais
+
+- **Given**: Existem workspaces prontos, com erro, com skills e sem skills cadastrados
+- **When**: O usuario abre a tela `/workspace`
+- **Then**: Todos os workspaces cadastrados aparecem juntos na lista principal, sem barra de busca nem selects de filtro
 
 ### Cenario: Qualquer pasta pode virar workspace
 
@@ -79,8 +92,8 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 
 ### Cenario: Sync por projeto
 
-- **Given**: O projeto ativo e `/repos/app-a`
-- **When**: O usuario executa sync para target `codex`
+- **Given**: O usuario selecionou o card de `/repos/app-a` na tela `/workspace`
+- **When**: Executa sync para target `codex`
 - **Then**: Os arquivos sao enviados preferencialmente para `/repos/app-a/.codex/...` (ou override global), sem misturar com outro projeto
 
 ### Cenario: Override global
@@ -94,11 +107,12 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 | Decisao | Motivo |
 |---------|--------|
 | Workspace = projeto local | O usuario pensa em projetos, nao em manifests |
-| CRUD explicito na tela `/workspace` | Facilita consulta, busca e manutencao quando houver muitos projetos |
+| CRUD explicito na tela `/workspace` | Facilita consulta e manutencao quando houver muitos projetos |
 | `ahub.workspace.json` continua existindo | Mantem rastreabilidade e reabertura consistente do projeto |
 | Sugestoes por skills detectadas | Acelera o primeiro cadastro sem obrigar o usuario a conhecer a estrutura interna |
 | Selecao guiada sem input de caminho | Reduz erro de digitacao e elimina dois fluxos concorrentes para o mesmo objetivo |
 | Tooltip curto ao lado dos campos | Mantem a interface legivel sem perder contexto operacional |
+| Card clicavel abre a edicao | Remove redundancia visual e deixa claro que a lista inteira e navegavel |
 | Diretorios por agente visiveis na UI | Garante que o usuario entenda onde Codex/Claude/Cursor vao ler os arquivos |
 | Paths locais por workspace como padrao | Evita misturar skills de projetos diferentes no mesmo diretorio global |
 
@@ -109,3 +123,5 @@ Definir o comportamento do agent-hub como um gerenciador de conteudo reutilizave
 | 2026-03-06 | Spec criada para formalizar workspaces multi-projeto e diretorios reconhecidos por agente |
 | 2026-03-06 | Atualizada para refletir CRUD de multiplos workspaces, sugestoes por skills detectadas e exibicao restrita a workspaces cadastrados |
 | 2026-03-06 | Atualizada para modal unico de selecao, navegacao sem digitacao manual e ajuda contextual por hover |
+| 2026-03-06 | Atualizada para tratar o card selecionado como contexto de edicao/sync e remover redundancias de `Editar` e `Tornar ativo` da UI |
+| 2026-03-06 | Atualizada para listar todos os workspaces sem filtros locais de busca, status ou skills |

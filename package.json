@@ -13,7 +13,7 @@
     "build:ui": "cd ui && npm run build",
     "build:all": "npm run build:ui && npm run build",
     "dev": "tsx bin/ahub.ts",
-    "dev:ui": "tsx bin/ahub.ts ui --dev",
+    "dev:ui": "tsx watch bin/ahub.ts ui --dev",
     "dev:stack": "bash ./scripts/dev-stack.sh",
     "test": "vitest",
     "test:coverage": "vitest --coverage",

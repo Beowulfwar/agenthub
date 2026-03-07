@@ -104,7 +104,11 @@ export async function deploy(req: DeployRequest): Promise<DeployResult> {
 
 export async function fetchWorkspace(path?: string): Promise<WorkspaceData> {
   const params = path ? { path } : {};
-  return unwrap(await api.get<ApiSuccess<WorkspaceData>>('/workspace', { params }));
+  const data = unwrap(await api.get<ApiSuccess<WorkspaceData>>('/workspace', { params }));
+  return {
+    ...data,
+    workspaceDir: data.workspaceDir ?? (data.filePath ? dirname(data.filePath) : null),
+  };
 }
 
 export async function saveWorkspace(filePath: string, manifest: WorkspaceManifest): Promise<{ saved: string }> {
@@ -116,11 +120,26 @@ export async function saveWorkspace(filePath: string, manifest: WorkspaceManifes
 // ---------------------------------------------------------------------------
 
 export async function fetchWorkspaceRegistry(): Promise<WorkspaceRegistryEntry[]> {
-  return unwrap(await api.get<ApiSuccess<WorkspaceRegistryEntry[]>>('/workspace/registry'));
+  const entries = unwrap(await api.get<ApiSuccess<WorkspaceRegistryEntry[]>>('/workspace/registry'));
+  return entries.map((entry) => ({
+    ...entry,
+    workspaceDir: entry.workspaceDir ?? dirname(entry.filePath),
+  }));
 }
 
 export async function fetchWorkspaceSuggestions(): Promise<WorkspaceSuggestion[]> {
-  return unwrap(await api.get<ApiSuccess<WorkspaceSuggestion[]>>('/workspace/suggestions'));
+  const legacySuggestions = unwrap(
+    await api.get<ApiSuccess<SuggestionDir[]>>('/explorer/suggestions'),
+  );
+
+  return legacySuggestions.map((suggestion) => ({
+    workspaceDir: suggestion.path,
+    label: suggestion.label,
+    manifestPath: `${suggestion.path.replace(/\/+$/, '')}/ahub.workspace.json`,
+    manifestExists: false,
+    skillCount: suggestion.skillCount,
+    detected: [],
+  }));
 }
 
 export async function registerWorkspaceApi(
@@ -131,7 +150,39 @@ export async function registerWorkspaceApi(
     name?: string;
   },
 ): Promise<{ registered: string; created: boolean }> {
-  return unwrap(await api.post<ApiSuccess<{ registered: string; created: boolean }>>('/workspace/registry', body));
+  const payload = body.directory && body.create === undefined
+    ? { ...body, create: true }
+    : body;
+
+  const result = unwrap(
+    await api.post<ApiSuccess<{ registered: string; created: boolean }>>('/workspace/registry', payload),
+  );
+
+  if (payload.directory) {
+    const requestedDirectory = normalizePath(payload.directory);
+    const registeredDirectory = normalizePath(dirname(result.registered));
+
+    if (requestedDirectory !== registeredDirectory) {
+      throw new Error(
+        `O backend registrou "${registeredDirectory}" em vez da pasta escolhida "${requestedDirectory}". Reinicie o backend atualizado antes de adicionar este workspace.`,
+      );
+    }
+  }
+
+  return result;
+}
+
+function dirname(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  parts.pop();
+  if (parts.length === 0) return normalized;
+  if (parts.length === 1 && parts[0] === '') return '/';
+  return parts.join('/') || '/';
+}
+
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
 }
 
 export async function unregisterWorkspaceApi(filePath: string): Promise<{ unregistered: string }> {
@@ -186,11 +237,13 @@ export function syncStream(params?: {
   force?: boolean;
   dryRun?: boolean;
   filter?: string[];
+  filePath?: string;
 }): EventSource {
   const qs = new URLSearchParams();
   if (params?.force) qs.set('force', 'true');
   if (params?.dryRun) qs.set('dryRun', 'true');
   if (params?.filter?.length) qs.set('filter', params.filter.join(','));
+  if (params?.filePath) qs.set('path', params.filePath);
 
   const url = `/api/sync/stream${qs.toString() ? `?${qs.toString()}` : ''}`;
   return new EventSource(url);

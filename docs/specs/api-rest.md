@@ -91,6 +91,12 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 - **When**: `GET /api/workspace/suggestions`
 - **Then**: A resposta sugere a raiz do projeto como `workspaceDir`, informa `skillCount`, `detected[]` e se `ahub.workspace.json` ja existe naquela pasta
 
+### POST /api/sync aceita um workspace explicito
+
+- **Given**: Body `{ filePath: "/projeto/app/ahub.workspace.json" }`
+- **When**: `POST /api/sync`
+- **Then**: O sync usa esse workspace explicitamente, sem depender do workspace ativo global
+
 ### POST /api/explorer/pick-directory retorna a pasta selecionada no dialogo nativo
 
 - **Given**: Cliente aciona a rota a partir da UI local
@@ -139,8 +145,8 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | GET | `/api/explorer/suggestions` | Sugerir diretorios iniciais para exploracao | `{ data: SuggestionDir[] }` | — |
 | POST | `/api/explorer/pick-directory` | Abrir seletor nativo de pasta | `{ data: { selectedDir } }` | 500 |
 | POST | `/api/deploy` | Deploy multi-skill multi-target | `{ data: { deployed[], failed[] } }` | 400 |
-| POST | `/api/sync` | Sync completo (nao-streaming) | `{ data: SyncResult }` | 404 |
-| GET | `/api/sync/stream` | SSE de progresso do sync | eventos SSE | evento error |
+| POST | `/api/sync` | Sync completo (nao-streaming), opcionalmente para `filePath` explicito | `{ data: SyncResult }` | 404 |
+| GET | `/api/sync/stream` | SSE de progresso do sync, opcionalmente para `path` explicito | eventos SSE | evento error |
 
 ### Mapeamento Error -> HTTP
 
@@ -206,3 +212,4 @@ API HTTP REST do agent-hub, construida com Hono e servida via `@hono/node-server
 | 2026-03-06 | Documentados explorer REST, picker nativo de pasta e registro de workspace por diretorio |
 | 2026-03-06 | Documentado retorno de diretorios reconhecidos por target no payload de workspace |
 | 2026-03-06 | Documentado o contrato de sugestoes de workspace e a regra de exibir apenas workspaces registrados |
+| 2026-03-06 | Documentado sync com workspace explicito para a UI nao depender de `ativo` como acao manual |

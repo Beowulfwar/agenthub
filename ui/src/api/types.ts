@@ -212,6 +212,7 @@ export interface SyncRequest {
   force?: boolean;
   filter?: string[];
   dryRun?: boolean;
+  filePath?: string;
 }
 
 export interface SyncResult {

@@ -9,6 +9,7 @@ import { requireConfig, getWorkspaceRegistry } from '../../core/config.js';
 import { findWorkspaceManifest, loadWorkspaceManifest } from '../../core/workspace.js';
 import { syncWorkspace } from '../../core/sync.js';
 import type { SyncProgressEvent } from '../../core/types.js';
+import { normalizeExternalPath } from '../../core/wsl.js';
 
 export function syncRoutes(): Hono {
   const app = new Hono();
@@ -20,10 +21,13 @@ export function syncRoutes(): Hono {
       force?: boolean;
       filter?: string[];
       dryRun?: boolean;
+      filePath?: string;
     }>();
 
     const registry = await getWorkspaceRegistry();
-    const manifestPath = registry.active ?? await findWorkspaceManifest();
+    const manifestPath = body.filePath
+      ? await normalizeExternalPath(body.filePath)
+      : registry.active ?? await findWorkspaceManifest();
     if (!manifestPath) {
       return c.json(
         { error: { code: 'NO_MANIFEST', message: 'No workspace manifest found.' } },
@@ -48,10 +52,13 @@ export function syncRoutes(): Hono {
         const force = c.req.query('force') === 'true';
         const dryRun = c.req.query('dryRun') === 'true';
         const filterParam = c.req.query('filter');
+        const pathParam = c.req.query('path');
         const filter = filterParam ? filterParam.split(',').map((s) => s.trim()) : undefined;
 
         const registry = await getWorkspaceRegistry();
-        const manifestPath = registry.active ?? await findWorkspaceManifest();
+        const manifestPath = pathParam
+          ? await normalizeExternalPath(pathParam)
+          : registry.active ?? await findWorkspaceManifest();
         if (!manifestPath) {
           await stream.writeSSE({
             event: 'error',

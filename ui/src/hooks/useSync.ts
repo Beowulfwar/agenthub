@@ -14,7 +14,7 @@ export function useSync() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const startSync = useCallback(
-    (params?: { force?: boolean; dryRun?: boolean; filter?: string[] }) => {
+    (params?: { force?: boolean; dryRun?: boolean; filter?: string[]; filePath?: string }) => {
       // Close any existing connection.
       if (eventSourceRef.current) {
         eventSourceRef.current.close();

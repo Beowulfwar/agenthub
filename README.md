@@ -130,6 +130,20 @@ npm run build                # Build TypeScript
 npm test                     # Rodar testes
 ```
 
+O script `npm run dev:stack` usa `scripts/dev-stack.sh` e faz restart limpo do ambiente local:
+
+- sobe a API em `3737` e a UI em `5173` por padrao
+- backend roda em watch e recarrega automaticamente ao salvar alteracoes locais
+- detecta portas ocupadas, encerra o processo anterior e reinicia os servicos
+- em ambientes WSL, usa um `TMPDIR` local para evitar falhas do `tsx` em paths montados
+- ao fechar com `Ctrl+C`, tenta encerrar os dois processos iniciados pelo script
+
+Tambem aceita sobrescrever as portas e o host da UI:
+
+```bash
+BACKEND_PORT=3738 FRONTEND_PORT=5174 FRONTEND_HOST=127.0.0.1 npm run dev:stack
+```
+
 ## Documentation
 
 - **Specs**: `docs/specs/` — Behavioral specs for each module (Given/When/Then format)
