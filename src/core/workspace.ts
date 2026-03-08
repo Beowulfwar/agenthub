@@ -1,25 +1,48 @@
 /**
  * Workspace manifest management for agent-hub.
  *
- * A workspace manifest (`ahub.workspace.json`) declares which skills
- * a project needs and which deploy targets they belong to.  The sync
- * engine reads this manifest to perform one-command environment setup.
+ * A workspace manifest (`ahub.workspace.json`) declares which cloud-backed
+ * contents a project needs and which deploy targets they belong to.
  *
- * The manifest is searched by walking up from the current directory,
- * similar to how `.gitignore` or `tsconfig.json` are resolved.
+ * Legacy version 1 manifests centered on `skills[]` are still accepted at
+ * load time and normalized to the canonical version 2 shape.
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
+  ContentRef,
   DeployTarget,
+  WorkspaceContentEntry,
+  WorkspaceContentGroup,
   WorkspaceManifest,
-  WorkspaceSkillEntry,
-  WorkspaceTargetGroup,
 } from './types.js';
 import { WorkspaceNotFoundError } from './errors.js';
 import { assertSafeSkillName } from './sanitize.js';
+
+type LegacyWorkspaceSkillEntry = {
+  name: string;
+  targets?: DeployTarget[];
+  source?: string;
+};
+
+type LegacyWorkspaceTargetGroup = {
+  targets: DeployTarget[];
+  skills: string[];
+};
+
+type LegacyWorkspaceManifest = {
+  version: 1;
+  name?: string;
+  description?: string;
+  defaultTargets?: DeployTarget[];
+  skills?: LegacyWorkspaceSkillEntry[];
+  groups?: LegacyWorkspaceTargetGroup[];
+  profile?: string;
+};
+
+type RawWorkspaceManifest = WorkspaceManifest | LegacyWorkspaceManifest;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,16 +57,12 @@ const VALID_TARGETS: ReadonlySet<string> = new Set<DeployTarget>([
   'cursor',
 ]);
 
+const VALID_CONTENT_TYPES = new Set(['skill', 'prompt', 'subagent']);
+
 // ---------------------------------------------------------------------------
 // Find manifest
 // ---------------------------------------------------------------------------
 
-/**
- * Walk up from `startDir` (default: `process.cwd()`) looking for a
- * workspace manifest file.
- *
- * @returns The absolute path to the manifest, or `null` if none found.
- */
 export async function findWorkspaceManifest(
   startDir?: string,
 ): Promise<string | null> {
@@ -69,11 +88,6 @@ export async function findWorkspaceManifest(
   }
 }
 
-/**
- * Look for a workspace manifest only inside the provided directory.
- *
- * Unlike `findWorkspaceManifest()`, this does not walk parent directories.
- */
 export async function findWorkspaceManifestInDirectory(
   dir: string,
 ): Promise<string | null> {
@@ -96,12 +110,6 @@ export async function findWorkspaceManifestInDirectory(
 // Load & validate
 // ---------------------------------------------------------------------------
 
-/**
- * Load and validate a workspace manifest from a specific file path.
- *
- * @throws {Error} when the file cannot be read or parsed.
- * @throws {Error} when validation fails (version, targets, skill names).
- */
 export async function loadWorkspaceManifest(
   filePath: string,
 ): Promise<WorkspaceManifest> {
@@ -112,61 +120,9 @@ export async function loadWorkspaceManifest(
     throw new Error(`Invalid workspace manifest at "${filePath}": expected a JSON object.`);
   }
 
-  const manifest = parsed as Record<string, unknown>;
-
-  // Version check.
-  if (manifest.version !== 1) {
-    throw new Error(
-      `Unsupported workspace manifest version: ${String(manifest.version)}. Expected 1.`,
-    );
-  }
-
-  const result = manifest as unknown as WorkspaceManifest;
-
-  // Validate default targets.
-  if (result.defaultTargets) {
-    for (const t of result.defaultTargets) {
-      if (!VALID_TARGETS.has(t)) {
-        throw new Error(`Invalid default target "${t}" in workspace manifest.`);
-      }
-    }
-  }
-
-  // Validate flat skills entries.
-  if (result.skills) {
-    for (const entry of result.skills) {
-      assertSafeSkillName(entry.name);
-      if (entry.targets) {
-        for (const t of entry.targets) {
-          if (!VALID_TARGETS.has(t)) {
-            throw new Error(`Invalid target "${t}" for skill "${entry.name}" in workspace manifest.`);
-          }
-        }
-      }
-    }
-  }
-
-  // Validate grouped entries.
-  if (result.groups) {
-    for (const group of result.groups) {
-      for (const t of group.targets) {
-        if (!VALID_TARGETS.has(t)) {
-          throw new Error(`Invalid target "${t}" in workspace manifest group.`);
-        }
-      }
-      for (const name of group.skills) {
-        assertSafeSkillName(name);
-      }
-    }
-  }
-
-  return result;
+  return normalizeWorkspaceManifest(parsed as Record<string, unknown>, filePath);
 }
 
-/**
- * Load the workspace manifest from the current directory (or upward),
- * throwing `WorkspaceNotFoundError` if none exists.
- */
 export async function requireWorkspaceManifest(
   startDir?: string,
 ): Promise<{ manifest: WorkspaceManifest; filePath: string }> {
@@ -183,14 +139,12 @@ export async function requireWorkspaceManifest(
 // Save
 // ---------------------------------------------------------------------------
 
-/**
- * Persist a workspace manifest to disk.
- */
 export async function saveWorkspaceManifest(
   filePath: string,
   manifest: WorkspaceManifest,
 ): Promise<void> {
-  const content = JSON.stringify(manifest, null, 2) + '\n';
+  const normalized = normalizeWorkspaceManifest(manifest as unknown as Record<string, unknown>, filePath);
+  const content = JSON.stringify(stripLegacyManifestAliases(normalized), null, 2) + '\n';
   await writeFile(filePath, content, 'utf-8');
 }
 
@@ -198,99 +152,81 @@ export async function saveWorkspaceManifest(
 // Resolve
 // ---------------------------------------------------------------------------
 
-/** A resolved skill with its final set of deploy targets. */
-export interface ResolvedSkill {
-  name: string;
+export interface ResolvedContent extends ContentRef {
   targets: DeployTarget[];
+  source?: string;
 }
 
-/**
- * Resolve a workspace manifest into a flat, deduplicated list of
- * `{ name, targets[] }` entries ready for the sync engine.
- *
- * Resolution rules:
- *   1. `groups[]` pairs each skill with the group's targets.
- *   2. `skills[]` uses `entry.targets ?? manifest.defaultTargets ?? ['claude-code']`.
- *   3. If a skill appears in both `groups` and `skills`, targets are merged.
- */
+export type ResolvedSkill = ResolvedContent;
+
+export function resolveManifestContents(
+  manifest: WorkspaceManifest,
+): ResolvedContent[] {
+  const canonicalManifest = ensureCanonicalManifest(manifest);
+  const fallbackTargets: DeployTarget[] = canonicalManifest.defaultTargets ?? ['claude-code'];
+  const targetMap = new Map<string, ResolvedContent>();
+
+  function addContent(
+    ref: ContentRef,
+    targets: DeployTarget[],
+    source?: string,
+  ): void {
+    const normalizedTargets = [...new Set(targets)].sort();
+    const key = contentKey(ref, source);
+    const existing = targetMap.get(key);
+
+    if (existing) {
+      existing.targets = [...new Set([...existing.targets, ...normalizedTargets])].sort();
+      return;
+    }
+
+    targetMap.set(key, {
+      ...ref,
+      targets: normalizedTargets,
+      ...(source ? { source } : {}),
+    });
+  }
+
+  for (const group of canonicalManifest.groups ?? []) {
+    for (const ref of group.contents) {
+      addContent(ref, group.targets);
+    }
+  }
+
+  for (const entry of canonicalManifest.contents ?? []) {
+    addContent(
+      { type: entry.type, name: entry.name },
+      entry.targets ?? fallbackTargets,
+      entry.source,
+    );
+  }
+
+  return [...targetMap.values()].sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function resolveManifestSkills(
   manifest: WorkspaceManifest,
 ): ResolvedSkill[] {
-  const fallbackTargets: DeployTarget[] = manifest.defaultTargets ?? ['claude-code'];
-
-  // Accumulate targets per skill name.
-  const targetMap = new Map<string, Set<DeployTarget>>();
-
-  function addSkill(name: string, targets: DeployTarget[]): void {
-    const existing = targetMap.get(name);
-    if (existing) {
-      for (const t of targets) existing.add(t);
-    } else {
-      targetMap.set(name, new Set(targets));
-    }
-  }
-
-  // Process groups.
-  if (manifest.groups) {
-    for (const group of manifest.groups) {
-      for (const name of group.skills) {
-        addSkill(name, group.targets);
-      }
-    }
-  }
-
-  // Process flat skills.
-  if (manifest.skills) {
-    for (const entry of manifest.skills) {
-      const targets = entry.targets ?? fallbackTargets;
-      addSkill(entry.name, targets);
-    }
-  }
-
-  // Convert to sorted array.
-  const result: ResolvedSkill[] = [];
-  for (const [name, targets] of targetMap) {
-    result.push({ name, targets: [...targets].sort() });
-  }
-
-  return result.sort((a, b) => a.name.localeCompare(b.name));
+  return resolveManifestContents(manifest);
 }
 
-function cloneManifest(manifest: WorkspaceManifest): WorkspaceManifest {
-  return {
-    ...manifest,
-    ...(manifest.defaultTargets ? { defaultTargets: [...manifest.defaultTargets] } : {}),
-    ...(manifest.skills
-      ? {
-          skills: manifest.skills.map((entry) => ({
-            ...entry,
-            ...(entry.targets ? { targets: [...entry.targets] } : {}),
-          })),
-        }
-      : {}),
-    ...(manifest.groups
-      ? {
-          groups: manifest.groups.map((group) => ({
-            targets: [...group.targets],
-            skills: [...group.skills],
-          })),
-        }
-      : {}),
-  };
-}
-
-export function setSkillTargetsInManifest(
+export function setContentTargetsInManifest(
   manifest: WorkspaceManifest,
-  name: string,
+  ref: ContentRef,
   targets: DeployTarget[],
 ): WorkspaceManifest {
-  assertSafeSkillName(name);
+  assertSafeSkillName(ref.name);
   const nextManifest = cloneManifest(manifest);
   const normalizedTargets = [...new Set(targets)].sort();
+  const existing = findManifestContent(nextManifest, ref);
 
-  if (nextManifest.skills) {
-    nextManifest.skills = nextManifest.skills.filter((entry) => entry.name !== name);
-    if (nextManifest.skills.length === 0) {
+  if (nextManifest.contents) {
+    nextManifest.contents = nextManifest.contents.filter((entry) => !contentRefsEqual(entry, ref));
+    if (nextManifest.contents.length === 0) {
+      delete nextManifest.contents;
       delete nextManifest.skills;
     }
   }
@@ -299,24 +235,60 @@ export function setSkillTargetsInManifest(
     nextManifest.groups = nextManifest.groups
       .map((group) => ({
         ...group,
-        skills: group.skills.filter((skillName) => skillName !== name),
+        contents: group.contents.filter((entry) => !contentRefsEqual(entry, ref)),
       }))
-      .filter((group) => group.skills.length > 0);
+      .filter((group) => group.contents.length > 0);
 
     if (nextManifest.groups.length === 0) {
       delete nextManifest.groups;
     }
   }
 
+  if (nextManifest.groups) {
+    nextManifest.groups = withLegacyGroupAliases(nextManifest.groups);
+  }
+
   if (normalizedTargets.length === 0) {
+    if (nextManifest.contents) {
+      nextManifest.skills = nextManifest.contents.map((entry) => ({
+        ...entry,
+        ...(entry.targets ? { targets: [...entry.targets] } : {}),
+      }));
+    }
     return nextManifest;
   }
 
-  const nextEntry: WorkspaceSkillEntry = { name, targets: normalizedTargets };
-  nextManifest.skills = [...(nextManifest.skills ?? []), nextEntry].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const nextEntry: WorkspaceContentEntry = {
+    ...ref,
+    targets: normalizedTargets,
+    ...(existing?.source ? { source: existing.source } : {}),
+  };
+
+  nextManifest.contents = [...(nextManifest.contents ?? []), nextEntry].sort(compareContentEntry);
+  nextManifest.skills = nextManifest.contents.map((entry) => ({
+    ...entry,
+    ...(entry.targets ? { targets: [...entry.targets] } : {}),
+  }));
   return nextManifest;
+}
+
+export function setSkillTargetsInManifest(
+  manifest: WorkspaceManifest,
+  name: string,
+  targets: DeployTarget[],
+): WorkspaceManifest {
+  return setContentTargetsInManifest(manifest, { type: 'skill', name }, targets);
+}
+
+export function addContentTargetToManifest(
+  manifest: WorkspaceManifest,
+  ref: ContentRef,
+  target: DeployTarget,
+): WorkspaceManifest {
+  const currentTargets =
+    resolveManifestContents(manifest)
+      .find((entry) => contentRefsEqual(entry, ref))?.targets ?? [];
+  return setContentTargetsInManifest(manifest, ref, [...currentTargets, target]);
 }
 
 export function addTargetToManifest(
@@ -324,9 +296,22 @@ export function addTargetToManifest(
   name: string,
   target: DeployTarget,
 ): WorkspaceManifest {
+  return addContentTargetToManifest(manifest, { type: 'skill', name }, target);
+}
+
+export function removeContentTargetFromManifest(
+  manifest: WorkspaceManifest,
+  ref: ContentRef,
+  target: DeployTarget,
+): WorkspaceManifest {
   const currentTargets =
-    resolveManifestSkills(manifest).find((entry) => entry.name === name)?.targets ?? [];
-  return setSkillTargetsInManifest(manifest, name, [...currentTargets, target]);
+    resolveManifestContents(manifest)
+      .find((entry) => contentRefsEqual(entry, ref))?.targets ?? [];
+  return setContentTargetsInManifest(
+    manifest,
+    ref,
+    currentTargets.filter((entry) => entry !== target),
+  );
 }
 
 export function removeTargetFromManifest(
@@ -334,11 +319,314 @@ export function removeTargetFromManifest(
   name: string,
   target: DeployTarget,
 ): WorkspaceManifest {
-  const currentTargets =
-    resolveManifestSkills(manifest).find((entry) => entry.name === name)?.targets ?? [];
-  return setSkillTargetsInManifest(
-    manifest,
-    name,
-    currentTargets.filter((entry) => entry !== target),
+  return removeContentTargetFromManifest(manifest, { type: 'skill', name }, target);
+}
+
+// ---------------------------------------------------------------------------
+// Normalization helpers
+// ---------------------------------------------------------------------------
+
+function normalizeWorkspaceManifest(
+  input: Record<string, unknown>,
+  filePath?: string,
+): WorkspaceManifest {
+  const version = input.version;
+  if (version !== 1 && version !== 2) {
+    throw new Error(
+      `Unsupported workspace manifest version: ${String(version)}. Expected 1 or 2.`,
+    );
+  }
+
+  const name = typeof input.name === 'string' ? input.name : undefined;
+  const description = typeof input.description === 'string' ? input.description : undefined;
+  const profile = typeof input.profile === 'string' ? input.profile : undefined;
+  const defaultTargets = normalizeTargets(
+    Array.isArray(input.defaultTargets) ? input.defaultTargets : undefined,
+    'default target',
   );
+
+  if (version === 1) {
+    const legacy = input as unknown as LegacyWorkspaceManifest;
+    const contents = normalizeLegacyEntries(legacy.skills, filePath);
+    const groups = normalizeLegacyGroups(legacy.groups, filePath);
+    return {
+      version: 2,
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {}),
+      ...(defaultTargets ? { defaultTargets } : {}),
+      ...(contents.length > 0 ? { contents, skills: contents } : {}),
+      ...(groups.length > 0 ? { groups: withLegacyGroupAliases(groups) } : {}),
+      ...(profile ? { profile } : {}),
+    };
+  }
+
+  const contents = normalizeContentEntries(
+    Array.isArray(input.contents) ? input.contents : undefined,
+    filePath,
+  );
+  const groups = normalizeContentGroups(
+    Array.isArray(input.groups) ? input.groups : undefined,
+    filePath,
+  );
+
+  return {
+    version: 2,
+    ...(name ? { name } : {}),
+    ...(description ? { description } : {}),
+    ...(defaultTargets ? { defaultTargets } : {}),
+    ...(contents.length > 0 ? { contents, skills: contents } : {}),
+    ...(groups.length > 0 ? { groups: withLegacyGroupAliases(groups) } : {}),
+    ...(profile ? { profile } : {}),
+  };
+}
+
+function normalizeLegacyEntries(
+  entries: LegacyWorkspaceSkillEntry[] | undefined,
+  filePath?: string,
+): WorkspaceContentEntry[] {
+  if (!entries) return [];
+
+  return entries.map((entry, index) => {
+    assertValidName(entry.name, filePath, `skills[${index}]`);
+    return {
+      type: 'skill' as const,
+      name: entry.name,
+      ...(entry.targets ? { targets: normalizeTargets(entry.targets, `skill "${entry.name}"`, filePath) } : {}),
+      ...(entry.source ? { source: entry.source } : {}),
+    };
+  }).sort(compareContentEntry);
+}
+
+function normalizeLegacyGroups(
+  groups: LegacyWorkspaceTargetGroup[] | undefined,
+  filePath?: string,
+): WorkspaceContentGroup[] {
+  if (!groups) return [];
+
+  return groups.map((group, groupIndex) => ({
+    targets: normalizeTargets(group.targets, `group ${groupIndex}`, filePath) ?? [],
+    contents: group.skills.map((name, contentIndex) => {
+      assertValidName(name, filePath, `groups[${groupIndex}].skills[${contentIndex}]`);
+      return { type: 'skill' as const, name };
+    }).sort(compareContentRef),
+  }));
+}
+
+function normalizeContentEntries(
+  entries: unknown[] | undefined,
+  filePath?: string,
+): WorkspaceContentEntry[] {
+  if (!entries) return [];
+
+  return entries.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error(errorPrefix(filePath, `contents[${index}] must be an object.`));
+    }
+    const record = entry as Record<string, unknown>;
+    const type = normalizeContentType(record.type, filePath, `contents[${index}].type`);
+    const name = normalizeContentName(record.name, filePath, `contents[${index}].name`);
+    const targets = Array.isArray(record.targets)
+      ? normalizeTargets(record.targets, `content "${type}/${name}"`, filePath)
+      : undefined;
+    const source = typeof record.source === 'string' ? record.source : undefined;
+
+    return {
+      type,
+      name,
+      ...(targets ? { targets } : {}),
+      ...(source ? { source } : {}),
+    };
+  }).sort(compareContentEntry);
+}
+
+function normalizeContentGroups(
+  groups: unknown[] | undefined,
+  filePath?: string,
+): WorkspaceContentGroup[] {
+  if (!groups) return [];
+
+  return groups.map((group, groupIndex) => {
+    if (typeof group !== 'object' || group === null) {
+      throw new Error(errorPrefix(filePath, `groups[${groupIndex}] must be an object.`));
+    }
+    const record = group as Record<string, unknown>;
+    const targets = normalizeTargets(
+      Array.isArray(record.targets) ? record.targets : undefined,
+      `group ${groupIndex}`,
+      filePath,
+    ) ?? [];
+    const contentsValue = record.contents;
+    if (!Array.isArray(contentsValue)) {
+      throw new Error(errorPrefix(filePath, `groups[${groupIndex}].contents must be an array.`));
+    }
+
+    return {
+      targets,
+      contents: contentsValue.map((item, contentIndex) => {
+        if (typeof item !== 'object' || item === null) {
+          throw new Error(errorPrefix(filePath, `groups[${groupIndex}].contents[${contentIndex}] must be an object.`));
+        }
+        const ref = item as Record<string, unknown>;
+        const type = normalizeContentType(ref.type, filePath, `groups[${groupIndex}].contents[${contentIndex}].type`);
+        const name = normalizeContentName(ref.name, filePath, `groups[${groupIndex}].contents[${contentIndex}].name`);
+        return { type, name };
+      }).sort(compareContentRef),
+    };
+  });
+}
+
+function normalizeTargets(
+  targets: unknown[] | undefined,
+  context: string,
+  filePath?: string,
+): DeployTarget[] | undefined {
+  if (!targets) return undefined;
+
+  return targets.map((value) => {
+    if (typeof value !== 'string' || !VALID_TARGETS.has(value)) {
+      const label = context === 'default target'
+        ? `Invalid default target "${String(value)}" in workspace manifest.`
+        : `Invalid target "${String(value)}" in ${context}.`;
+      throw new Error(errorPrefix(filePath, label));
+    }
+    return value as DeployTarget;
+  });
+}
+
+function normalizeContentType(
+  value: unknown,
+  filePath: string | undefined,
+  context: string,
+): 'skill' | 'prompt' | 'subagent' {
+  if (typeof value !== 'string' || !VALID_CONTENT_TYPES.has(value)) {
+    throw new Error(errorPrefix(filePath, `Invalid content type "${String(value)}" in ${context}.`));
+  }
+  return value as 'skill' | 'prompt' | 'subagent';
+}
+
+function normalizeContentName(
+  value: unknown,
+  filePath: string | undefined,
+  context: string,
+): string {
+  if (typeof value !== 'string') {
+    throw new Error(errorPrefix(filePath, `Invalid content name "${String(value)}" in ${context}.`));
+  }
+  assertValidName(value, filePath, context);
+  return value;
+}
+
+function assertValidName(name: string, filePath?: string, context?: string): void {
+  try {
+    assertSafeSkillName(name);
+  } catch (err) {
+    const message = context
+      ? `${context} has invalid name "${name}".`
+      : `Invalid content name "${name}".`;
+    throw new Error(errorPrefix(filePath, message), { cause: err });
+  }
+}
+
+function cloneManifest(manifest: WorkspaceManifest): WorkspaceManifest {
+  const normalized = ensureCanonicalManifest(manifest);
+  return {
+    version: 2,
+    ...(normalized.name ? { name: normalized.name } : {}),
+    ...(normalized.description ? { description: normalized.description } : {}),
+    ...(normalized.defaultTargets ? { defaultTargets: [...normalized.defaultTargets] } : {}),
+    ...(normalized.contents
+      ? {
+          contents: normalized.contents.map((entry) => ({
+            ...entry,
+            ...(entry.targets ? { targets: [...entry.targets] } : {}),
+          })),
+          skills: normalized.contents.map((entry) => ({
+            ...entry,
+            ...(entry.targets ? { targets: [...entry.targets] } : {}),
+          })),
+        }
+      : {}),
+    ...(normalized.groups
+      ? {
+          groups: withLegacyGroupAliases(normalized.groups.map((group) => ({
+            targets: [...group.targets],
+            contents: group.contents.map((entry) => ({ ...entry })),
+          }))),
+        }
+      : {}),
+    ...(normalized.profile ? { profile: normalized.profile } : {}),
+  };
+}
+
+function withLegacyGroupAliases(groups: WorkspaceContentGroup[]): WorkspaceContentGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    skills: group.contents.map((entry) => entry.name),
+  }));
+}
+
+function stripLegacyManifestAliases(manifest: WorkspaceManifest): WorkspaceManifest {
+  return {
+    version: 2,
+    ...(manifest.name ? { name: manifest.name } : {}),
+    ...(manifest.description ? { description: manifest.description } : {}),
+    ...(manifest.defaultTargets ? { defaultTargets: [...manifest.defaultTargets] } : {}),
+    ...(manifest.contents
+      ? {
+          contents: manifest.contents.map((entry) => ({
+            type: entry.type,
+            name: entry.name,
+            ...(entry.targets ? { targets: [...entry.targets] } : {}),
+            ...(entry.source ? { source: entry.source } : {}),
+          })),
+        }
+      : {}),
+    ...(manifest.groups
+      ? {
+          groups: manifest.groups.map((group) => ({
+            targets: [...group.targets],
+            contents: group.contents.map((entry) => ({ ...entry })),
+          })),
+        }
+      : {}),
+    ...(manifest.profile ? { profile: manifest.profile } : {}),
+  };
+}
+
+function compareContentRef(a: ContentRef, b: ContentRef): number {
+  if (a.type !== b.type) return a.type.localeCompare(b.type);
+  return a.name.localeCompare(b.name);
+}
+
+function compareContentEntry(a: WorkspaceContentEntry, b: WorkspaceContentEntry): number {
+  return compareContentRef(a, b);
+}
+
+function contentRefsEqual(a: ContentRef, b: ContentRef): boolean {
+  return a.type === b.type && a.name === b.name;
+}
+
+function contentKey(ref: ContentRef, source?: string): string {
+  return `${source ?? ''}::${ref.type}::${ref.name}`;
+}
+
+function findManifestContent(
+  manifest: WorkspaceManifest,
+  ref: ContentRef,
+): WorkspaceContentEntry | null {
+  return manifest.contents?.find((entry) => contentRefsEqual(entry, ref)) ?? null;
+}
+
+function errorPrefix(filePath: string | undefined, message: string): string {
+  return filePath
+    ? `Invalid workspace manifest at "${filePath}": ${message}`
+    : message;
+}
+
+function ensureCanonicalManifest(manifest: WorkspaceManifest): WorkspaceManifest {
+  if ((manifest as WorkspaceManifest).version === 2 && manifest.contents && manifest.groups?.every((group) => Array.isArray(group.contents))) {
+    return manifest;
+  }
+
+  return normalizeWorkspaceManifest(manifest as unknown as Record<string, unknown>);
 }

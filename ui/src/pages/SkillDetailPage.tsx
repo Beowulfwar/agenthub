@@ -14,20 +14,24 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
-import { useDeleteSkill, usePatchSkill, useSkill } from '../hooks/useSkills';
+import { useContent, useDeleteContent, usePatchContent } from '../hooks/useSkills';
 import { DeployDialog } from '../components/deploy/DeployDialog';
 import { EditSkillForm } from '../components/skills/EditSkillForm';
 import { CloneDialog } from '../components/skills/CloneDialog';
 import { RenameDialog } from '../components/skills/RenameDialog';
 import { SkillInfoPanel } from '../components/skills/SkillInfoPanel';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import type { ContentRef, ContentType } from '../api/types';
 
 export function SkillDetailPage() {
-  const { name } = useParams<{ name: string }>();
+  const { type, name } = useParams<{ type?: ContentType; name: string }>();
+  const ref: ContentRef | null = name
+    ? { type: type ?? 'skill', name }
+    : null;
   const navigate = useNavigate();
-  const { data: pkg, isLoading, error } = useSkill(name ?? '');
-  const deleteMutation = useDeleteSkill();
-  const patchMutation = usePatchSkill();
+  const { data: pkg, isLoading, error } = useContent(ref);
+  const deleteMutation = useDeleteContent();
+  const patchMutation = usePatchContent();
 
   const [showDeploy, setShowDeploy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -35,15 +39,15 @@ export function SkillDetailPage() {
   const [showRename, setShowRename] = useState(false);
 
   const handleDelete = () => {
-    if (!name) return;
-    if (!confirm(`Remover a skill "${name}"? Esta acao nao pode ser desfeita.`)) return;
-    deleteMutation.mutate(name, {
+    if (!ref) return;
+    if (!confirm(`Remover o conteudo "${ref.type}/${ref.name}"? Esta acao nao pode ser desfeita.`)) return;
+    deleteMutation.mutate(ref, {
       onSuccess: () => {
-        toast.success(`"${name}" removida`);
+        toast.success(`"${ref.name}" removido`);
         navigate('/skills');
       },
       onError: (err) => {
-        toast.error(err instanceof Error ? err.message : 'Falha ao remover a skill');
+        toast.error(err instanceof Error ? err.message : 'Falha ao remover o conteudo');
       },
     });
   };
@@ -57,42 +61,42 @@ export function SkillDetailPage() {
 
   const handleSave = useCallback(
     (patch: { description?: string; body?: string; tags?: string[]; category?: string }) => {
-      if (!name) return;
+      if (!ref) return;
       patchMutation.mutate(
-        { name, patch },
+        { ref, patch },
         {
           onSuccess: () => {
-            toast.success('Skill salva');
+            toast.success('Conteudo salvo');
             setIsEditing(false);
           },
           onError: (err) => {
-            toast.error(err instanceof Error ? err.message : 'Falha ao salvar a skill');
+            toast.error(err instanceof Error ? err.message : 'Falha ao salvar o conteudo');
           },
         },
       );
     },
-    [name, patchMutation],
+    [patchMutation, ref],
   );
 
   const handleCloneSuccess = (newName: string) => {
     setShowClone(false);
-    navigate(`/skills/${encodeURIComponent(newName)}`);
+    navigate(`/skills/${encodeURIComponent(ref?.type ?? 'skill')}/${encodeURIComponent(newName)}`);
   };
 
   const handleRenameSuccess = (newName: string) => {
     setShowRename(false);
-    navigate(`/skills/${encodeURIComponent(newName)}`, { replace: true });
+    navigate(`/skills/${encodeURIComponent(ref?.type ?? 'skill')}/${encodeURIComponent(newName)}`, { replace: true });
   };
 
   if (isLoading) {
-    return <LoadingSpinner className="py-24" size="lg" label="Carregando skill..." />;
+    return <LoadingSpinner className="py-24" size="lg" label="Carregando conteudo..." />;
   }
 
   if (error || !pkg) {
     return (
       <div className="mx-auto max-w-3xl">
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          {error instanceof Error ? error.message : 'Skill nao encontrada'}
+          {error instanceof Error ? error.message : 'Conteudo nao encontrado'}
         </div>
       </div>
     );
@@ -120,8 +124,8 @@ export function SkillDetailPage() {
               <p className="mt-2 text-sm text-gray-500">{skillDescription}</p>
             )}
             <p className="mt-3 text-sm text-gray-500">
-              Esta e a definicao global da skill na nuvem. O fluxo operacional agora vive em
-              `/skills`: escolha o workspace, o agente e baixe a skill para o destino correto.
+              Esta e a definicao global de `type/name` na nuvem. O fluxo operacional agora vive em
+              `/skills`: escolha o workspace, o agente e baixe o conteudo para o destino correto.
             </p>
           </div>
 
@@ -179,7 +183,7 @@ export function SkillDetailPage() {
         </div>
       </div>
 
-      {name && <SkillInfoPanel name={name} />}
+      {ref && <SkillInfoPanel ref={ref} />}
 
       {isEditing ? (
         <div className="rounded-xl border border-gray-200 bg-white p-5">
@@ -241,19 +245,22 @@ export function SkillDetailPage() {
         </>
       )}
 
-      {showDeploy && name && (
-        <DeployDialog skillNames={[name]} onClose={() => setShowDeploy(false)} />
+      {showDeploy && ref && (
+        <DeployDialog
+          contentRefs={[ref]}
+          onClose={() => setShowDeploy(false)}
+        />
       )}
-      {showClone && name && (
+      {showClone && ref && (
         <CloneDialog
-          skillName={name}
+          contentRef={ref}
           onClose={() => setShowClone(false)}
           onSuccess={handleCloneSuccess}
         />
       )}
-      {showRename && name && (
+      {showRename && ref && (
         <RenameDialog
-          skillName={name}
+          contentRef={ref}
           onClose={() => setShowRename(false)}
           onSuccess={handleRenameSuccess}
         />

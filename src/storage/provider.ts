@@ -5,7 +5,7 @@
  * rest of the application can work against a single abstraction.
  */
 
-import type { ContentType, HealthCheckResult, SkillPackage } from '../core/types.js';
+import type { ContentPackage, ContentRef, ContentType, HealthCheckResult } from '../core/types.js';
 
 /** Options for listing skills with optional filters. */
 export interface ListOptions {
@@ -17,7 +17,7 @@ export interface ListOptions {
 
 export interface StorageProvider {
   /** Provider identifier. */
-  readonly name: 'git' | 'drive' | 'local';
+  readonly name: 'git' | 'drive' | 'local' | 'github';
 
   /** Verify that the provider is reachable and credentials are valid. */
   healthCheck(): Promise<HealthCheckResult>;
@@ -29,34 +29,37 @@ export interface StorageProvider {
    */
   list(options?: string | ListOptions): Promise<string[]>;
 
+  /** Canonical listing that preserves `type + name` identity. */
+  listContentRefs(options?: string | ListOptions): Promise<ContentRef[]>;
+
   /** Return `true` when a skill with the given name exists. */
-  exists(name: string): Promise<boolean>;
+  exists(name: string | ContentRef): Promise<boolean>;
 
   /**
    * Retrieve a full skill package by name.
    *
    * @throws {SkillNotFoundError} when the skill does not exist.
    */
-  get(name: string): Promise<SkillPackage>;
+  get(name: string | ContentRef): Promise<ContentPackage>;
 
   /**
    * Create or update a skill package.
    *
    * The skill name is taken from `pkg.skill.name`.
    */
-  put(pkg: SkillPackage): Promise<void>;
+  put(pkg: ContentPackage): Promise<void>;
 
   /**
    * Delete a skill by name.
    *
    * @throws {SkillNotFoundError} when the skill does not exist.
    */
-  delete(name: string): Promise<void>;
+  delete(name: string | ContentRef): Promise<void>;
 
   /**
    * Stream every skill in the backend.
    *
    * Useful for full exports and migrations.
    */
-  exportAll(): AsyncIterable<SkillPackage>;
+  exportAll(): AsyncIterable<ContentPackage>;
 }

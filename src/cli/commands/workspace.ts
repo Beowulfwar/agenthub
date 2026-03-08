@@ -472,10 +472,10 @@ async function ensureManifest(baseDir: string, skipConfirm?: boolean): Promise<s
   }
 
   const manifest: WorkspaceManifest = {
-    version: 1,
+    version: 2,
     name: path.basename(baseDir),
     defaultTargets: ['claude-code'],
-    skills: [],
+    contents: [],
   };
 
   await saveWorkspaceManifest(manifestPath, manifest);
@@ -508,9 +508,9 @@ async function runList(): Promise<void> {
       const name = manifest.name ?? path.basename(path.dirname(wsPath));
       console.log(`  ${marker} ${chalk.bold(name)}`);
       console.log(`    ${chalk.dim(label)}`);
-      if (manifest.skills?.length || manifest.groups?.length) {
-        const skillCount = (manifest.skills?.length ?? 0) +
-          (manifest.groups?.reduce((s, g) => s + g.skills.length, 0) ?? 0);
+      if (manifest.contents?.length || manifest.groups?.length) {
+        const skillCount = (manifest.contents?.length ?? 0) +
+          (manifest.groups?.reduce((s, g) => s + (g.contents?.length ?? g.skills?.length ?? 0), 0) ?? 0);
         console.log(`    ${chalk.dim(`${skillCount} skills configured`)}`);
       }
     } catch {

@@ -11,6 +11,7 @@ import { GitProvider } from './git-provider.js';
 import { DriveProvider } from './drive-provider.js';
 import { LocalProvider } from './local-provider.js';
 import { AggregateProvider } from './aggregate-provider.js';
+import { GitHubSourceProvider } from '../providers/github/github-storage-provider.js';
 
 /**
  * Instantiate the correct {@link StorageProvider} based on the active config.
@@ -92,6 +93,13 @@ export function createProviderFromSource(source: SourceConfig): StorageProvider 
         throw new ProviderNotConfiguredError(`local (source "${source.id}")`);
       }
       return new LocalProvider(source.local);
+    }
+
+    case 'github': {
+      if (!source.github) {
+        throw new ProviderNotConfiguredError(`github (source "${source.id}")`);
+      }
+      return new GitHubSourceProvider(source.github);
     }
 
     default: {

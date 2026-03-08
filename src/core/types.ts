@@ -32,17 +32,23 @@ export const MARKER_TO_TYPE: Record<string, ContentType> = {
   'AGENT.md': 'subagent',
 };
 
+/** Canonical identity for content stored in the hub. */
+export interface ContentRef {
+  type: ContentType;
+  name: string;
+}
+
 // ---------------------------------------------------------------------------
 // Skill types
 // ---------------------------------------------------------------------------
 
 /** Arbitrary metadata extracted from YAML frontmatter. */
-export interface SkillMetadata {
+export interface ContentMetadata {
   [key: string]: unknown;
 }
 
 /** A parsed skill (SKILL.md/PROMPT.md/AGENT.md frontmatter + body). */
-export interface Skill {
+export interface Content {
   /** Unique kebab-case identifier. */
   name: string;
   /** Content type. Undefined or absent defaults to 'skill' (backward compat). */
@@ -52,11 +58,11 @@ export interface Skill {
   /** Markdown body (everything after the frontmatter). */
   body: string;
   /** Extra YAML frontmatter fields beyond name/description/type. */
-  metadata?: SkillMetadata;
+  metadata?: ContentMetadata;
 }
 
 /** A single file that belongs to a skill package. */
-export interface SkillFile {
+export interface ContentFile {
   /** Path relative to the skill directory root (e.g. "agents/openai.yaml"). */
   relativePath: string;
   /** UTF-8 file content. */
@@ -64,12 +70,18 @@ export interface SkillFile {
 }
 
 /** A skill together with its companion files (agents/, scripts/, references/). */
-export interface SkillPackage {
+export interface ContentPackage {
   /** The parsed SKILL.md. */
-  skill: Skill;
+  skill: Content;
   /** Every file inside the skill directory (including SKILL.md itself). */
-  files: SkillFile[];
+  files: ContentFile[];
 }
+
+// Temporary aliases to reduce churn while moving the public vocabulary to "content".
+export type SkillMetadata = ContentMetadata;
+export type Skill = Content;
+export type SkillFile = ContentFile;
+export type SkillPackage = ContentPackage;
 
 // ---------------------------------------------------------------------------
 // Deploy targets
@@ -195,6 +207,26 @@ export interface GitConfig {
   skillsDir: string;
 }
 
+export type GitHubRepoVisibility = 'private' | 'public';
+
+/** GitHub cloud backend settings for the optional remote storage provider. */
+export interface GitHubConfig {
+  /** Repository owner login (personal account in v1). */
+  owner: string;
+  /** Repository name. */
+  repo: string;
+  /** Branch used for sync operations. Defaults to "main". */
+  branch: string;
+  /** Optional base path prefix inside the repository. Defaults to ".". */
+  basePath: string;
+  /** Authenticated GitHub account login. */
+  accountLogin: string;
+  /** Authenticated GitHub account numeric ID stored as string for config portability. */
+  accountId: string;
+  /** Visibility chosen at bootstrap time. */
+  visibility: GitHubRepoVisibility;
+}
+
 /** Google Drive backend settings. */
 export interface DriveConfig {
   /** The Drive folder ID that holds skill directories. */
@@ -216,13 +248,15 @@ export interface SourceConfig {
   /** Human-readable label for display. */
   label?: string;
   /** Storage backend type. */
-  provider: 'git' | 'drive' | 'local';
+  provider: 'git' | 'drive' | 'local' | 'github';
   /** Git backend settings (required when provider === 'git'). */
   git?: GitConfig;
   /** Google Drive settings (required when provider === 'drive'). */
   drive?: DriveConfig;
   /** Local directory settings (required when provider === 'local'). */
   local?: LocalConfig;
+  /** GitHub cloud backend settings (required when provider === 'github'). */
+  github?: GitHubConfig;
   /** Whether this source is active. Defaults to true. */
   enabled?: boolean;
 }
@@ -460,6 +494,7 @@ export type SkillsHubStatus =
   | 'missing_in_provider';
 
 export interface SkillsHubCloudItem {
+  contentId: string;
   name: string;
   type: ContentType;
   description: string | null;
@@ -498,6 +533,7 @@ export interface SkillsHubShell {
 }
 
 export interface SkillsHubWorkspaceSkill {
+  contentId: string;
   name: string;
   type: ContentType | null;
   description: string | null;
@@ -512,6 +548,36 @@ export interface SkillsHubWorkspaceSkill {
   warning?: string;
   localPaths: string[];
   availableActions: Array<'download' | 'upload' | 'copy' | 'move' | 'compare'>;
+}
+
+export type SkillsHubWorkspaceRuleSource = 'projected' | 'local';
+
+export interface SkillsHubWorkspaceRule {
+  id: string;
+  name: string;
+  appId: AgentAppId;
+  appLabel: string;
+  source: SkillsHubWorkspaceRuleSource;
+  writable: boolean;
+  detectedPath: string;
+  expectedPath: string;
+  repositoryPath: string;
+  visibilityStatus: ArtifactVisibilityStatus;
+  legacyStatus: ArtifactLegacyStatus;
+  lossiness: ArtifactLossiness;
+  sourceDocs: string[];
+  projectedFrom?: ContentRef | null;
+}
+
+export interface SkillsHubWorkspaceRulesSection {
+  appId: AgentAppId;
+  label: string;
+  supportLevel: SupportLevel;
+  writable: boolean;
+  canonicalPaths: string[];
+  legacyPaths: string[];
+  docUrls: string[];
+  rules: SkillsHubWorkspaceRule[];
 }
 
 export interface SkillsHubWorkspaceAgentDetail {
@@ -532,6 +598,7 @@ export interface SkillsHubWorkspaceDetail {
   isActive: boolean;
   counts: Record<SkillsHubStatus, number> & { total: number };
   agents: SkillsHubWorkspaceAgentDetail[];
+  rules: SkillsHubWorkspaceRulesSection[];
 }
 
 export interface SkillsHubDiffSide {
@@ -544,7 +611,9 @@ export interface SkillsHubDiffSide {
 }
 
 export interface SkillsHubDiffResult {
+  contentId: string;
   name: string;
+  type: ContentType;
   workspaceFilePath: string;
   workspaceName: string;
   target: DeployTarget;
@@ -558,6 +627,9 @@ export interface SkillsHubDiffResult {
 }
 
 export interface SkillsHubActionSuccess {
+  contentId: string;
+  name: string;
+  type: ContentType;
   skill: string;
   target?: DeployTarget;
   path?: string;
@@ -567,6 +639,9 @@ export interface SkillsHubActionSuccess {
 }
 
 export interface SkillsHubActionFailure {
+  contentId: string;
+  name: string;
+  type: ContentType;
   skill: string;
   target?: DeployTarget;
   error: string;
@@ -594,9 +669,9 @@ export interface HealthCheckResult {
 // Workspace manifest
 // ---------------------------------------------------------------------------
 
-/** A single skill entry in a workspace manifest. */
-export interface WorkspaceSkillEntry {
-  /** Skill name (must exist in the storage backend). */
+/** A single canonical content entry in a workspace manifest. */
+export interface WorkspaceContentEntry extends ContentRef {
+  /** Content name (must exist in the storage backend). */
   name: string;
   /** Override targets for this specific skill (optional). */
   targets?: DeployTarget[];
@@ -604,31 +679,39 @@ export interface WorkspaceSkillEntry {
   source?: string;
 }
 
-/** A group of skills organized by deploy target. */
-export interface WorkspaceTargetGroup {
+/** A group of contents organized by deploy target. */
+export interface WorkspaceContentGroup {
   /** Which deploy target(s) this group covers. */
   targets: DeployTarget[];
-  /** Skills belonging to this group. */
-  skills: string[];
+  /** Contents belonging to this group. */
+  contents: ContentRef[];
+  /** Legacy alias accepted during the v1 -> v2 migration. */
+  skills?: string[];
 }
 
 /** The workspace manifest file shape (`ahub.workspace.json`). */
 export interface WorkspaceManifest {
   /** Schema version for forward compatibility. */
-  version: 1;
+  version: 2;
   /** Optional human-readable workspace name. */
   name?: string;
   /** Optional description. */
   description?: string;
   /** Default deploy targets when a skill does not specify its own. */
   defaultTargets?: DeployTarget[];
-  /** Skill entries (flat mode). */
-  skills?: WorkspaceSkillEntry[];
-  /** Skills organized by target group (grouped mode). */
-  groups?: WorkspaceTargetGroup[];
+  /** Canonical content entries (flat mode). */
+  contents?: WorkspaceContentEntry[];
+  /** Legacy flat entries accepted during the v1 -> v2 migration. */
+  skills?: WorkspaceContentEntry[];
+  /** Contents organized by target group (grouped mode). */
+  groups?: WorkspaceContentGroup[];
   /** Optional profile name to use (overrides global config). */
   profile?: string;
 }
+
+// Legacy aliases kept while the rest of the codebase migrates from "skill" naming.
+export type WorkspaceSkillEntry = WorkspaceContentEntry;
+export type WorkspaceTargetGroup = WorkspaceContentGroup;
 
 /** Resolved target directories for a workspace or tool environment. */
 export interface DeployTargetDirectory {

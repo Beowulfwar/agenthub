@@ -12,7 +12,11 @@
 // ---------------------------------------------------------------------------
 
 export type {
+  ContentRef,
   ContentType,
+  Content,
+  ContentFile,
+  ContentPackage,
   Skill,
   SkillFile,
   SkillMetadata,
@@ -29,6 +33,8 @@ export type {
   AgentAppCatalogItem,
   DetectedAppArtifact,
   GitConfig,
+  GitHubConfig,
+  GitHubRepoVisibility,
   DriveConfig,
   LocalConfig,
   SourceConfig,
@@ -56,10 +62,25 @@ export {
   ALL_MARKER_FILES,
   MARKER_TO_TYPE,
 } from './core/types.js';
+export {
+  isContentType,
+  formatContentRef,
+  parseContentRef,
+  contentRefsEqual,
+} from './core/content-ref.js';
 
 export { listAgentApps } from './core/app-registry.js';
 export { detectAppArtifacts, buildWorkspaceAppInventories } from './core/app-artifacts.js';
 export { planAppMigration, executeAppMigration } from './core/app-migration.js';
+export {
+  planStorageLayoutMigration,
+  applyStorageLayoutMigration,
+} from './core/storage-layout-migration.js';
+export {
+  readLocalWorkspaceRule,
+  upsertLocalWorkspaceRule,
+  deleteLocalWorkspaceRule,
+} from './core/local-rules.js';
 
 // ---------------------------------------------------------------------------
 // Core — Errors
@@ -71,6 +92,8 @@ export {
   SkillNotFoundError,
   SkillValidationError,
   AuthenticationError,
+  SecretStoreError,
+  ConflictError,
   MigrationError,
   WorkspaceNotFoundError,
   SyncError,
@@ -113,6 +136,7 @@ export {
   isLegacyConfig,
   migrateConfigToV2,
   addSource,
+  upsertSource,
   removeSource,
   listSources,
   setDefaultSource,
@@ -196,6 +220,36 @@ export { GitProvider } from './storage/git-provider.js';
 export { DriveProvider } from './storage/drive-provider.js';
 export { LocalProvider } from './storage/local-provider.js';
 export { AggregateProvider, parseQualifiedName, formatQualifiedName } from './storage/aggregate-provider.js';
+export type {
+  ArtifactStorageProvider,
+  ArtifactProviderKind,
+  RemoteFileEntry,
+  RemoteFile,
+  PutFileInput,
+  PutFileResult,
+  DeleteFileInput,
+  RepositoryRef,
+  BootstrapRepositoryInput,
+} from './providers/contracts/artifact-storage.js';
+export { GitHubStorageProvider, GitHubSourceProvider } from './providers/github/github-storage-provider.js';
+export { GitHubOAuthService } from './providers/github/github-oauth-service.js';
+export { GitHubApiClient } from './providers/github/github-api-client.js';
+export {
+  DEFAULT_GITHUB_SOURCE_ID,
+  DEFAULT_LOCAL_SOURCE_ID,
+  DEFAULT_LOCAL_LIBRARY_DIR,
+  findGitHubSource,
+  ensureCanonicalLocalSource,
+  previewGitHubSync,
+  syncGitHubFromLocal,
+} from './providers/github/github-sync-service.js';
+export {
+  KEYCHAIN_SERVICE,
+  githubTokenAccountKey,
+  getSecret,
+  setSecret,
+  deleteSecret,
+} from './core/secrets/keychain.js';
 
 // ---------------------------------------------------------------------------
 // Deploy — Deployer interface & implementations

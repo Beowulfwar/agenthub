@@ -1,100 +1,64 @@
 # core-workspace
 
-> Spec comportamental — contrato vivo para agentes e desenvolvedores.
+> Spec comportamental — contrato vivo do manifesto de workspace.
 
 ## Proposito
 
-Gerenciar o arquivo de workspace (`ahub.workspace.json` ou `.ahub.json`) que funciona como profile de sync de um projeto. O modulo busca o arquivo subindo a arvore de diretorios, valida o schema e resolve a lista final de skills com seus targets mesclados. O arquivo nao e a origem das skills; ele apenas descreve o que o projeto deseja sincronizar.
+Gerenciar o arquivo de workspace (`ahub.workspace.json` ou `.ahub.json`) que descreve quais conteudos cloud-backed um projeto deseja sincronizar. O manifesto agora tem identidade canonica por `type + name`, usa `contents[]` como shape oficial em `version: 2` e continua aceitando aliases legados `skills[]` e `groups.skills[]` durante a transicao.
 
 ## Localizacao
 
 - **Arquivo fonte**: `src/core/workspace.ts`
 - **Testes**: `tests/core/workspace.test.ts`
-- **Artefato em disco**: `ahub.workspace.json` ou `.ahub.json` na raiz do projeto
+- **Artefato em disco**: `ahub.workspace.json` ou `.ahub.json`
 
 ## Invariantes
 
-1. A busca pelo arquivo de workspace e ascendente: comeca no `startDir` (ou `cwd`) e sobe ate a raiz do filesystem.
-2. Dois nomes sao aceitos, nesta ordem de prioridade: `ahub.workspace.json`, `.ahub.json`.
-3. `version: 1` e obrigatorio — qualquer outro valor lanca `Error`.
-4. Targets invalidos (fora de `'claude-code' | 'codex' | 'cursor'`) sao rejeitados durante `loadWorkspaceManifest`.
-5. Nomes de skills sao validados via `assertSafeSkillName` (prevencao de path traversal).
-6. `requireWorkspaceManifest` lanca `WorkspaceNotFoundError` se nenhum manifesto for encontrado.
-7. `resolveManifestSkills` aplica `defaultTargets` como fallback; se `defaultTargets` tambem for ausente, usa `['claude-code']`.
-8. Skills presentes tanto em `groups` quanto em `skills` tem seus targets mesclados (uniao de conjuntos).
-9. O resultado de `resolveManifestSkills` e ordenado alfabeticamente por nome, e os targets de cada skill tambem sao ordenados alfabeticamente.
-10. `saveWorkspaceManifest` serializa com indentacao de 2 espacos e newline final.
-11. Um workspace pode ser criado com `skills: []` e continuar valido para representar um projeto novo.
+1. A busca pelo manifesto continua ascendente a partir do `startDir` ate a raiz do filesystem.
+2. Dois nomes continuam aceitos, nesta ordem: `ahub.workspace.json`, `.ahub.json`.
+3. `version: 1` e `version: 2` sao aceitos; qualquer outro valor gera erro explicito.
+4. O shape canonico em memoria e sempre `version: 2`, com `contents[]` e `groups.contents[]`.
+5. Entradas legadas `skills[]` e `groups.skills[]` sao lidas como `type: 'skill'`.
+6. A identidade canonica do manifesto e `ContentRef = { type, name }`; slugs iguais podem coexistir entre tipos diferentes.
+7. Targets invalidos continuam sendo rejeitados durante `loadWorkspaceManifest`.
+8. Nomes continuam validados via `assertSafeSkillName`.
+9. `resolveManifestSkills` continua sendo o alias retrocompativel da lista flat resolvida, mas agora devolve entradas com `type`.
+10. `defaultTargets` continua sendo fallback por entrada; quando ausente, o fallback final continua `['claude-code']`.
+11. `saveWorkspaceManifest` sempre persiste `version: 2` e remove aliases legados do payload salvo.
+12. Um workspace pode ser salvo com `contents: []` e continuar valido.
 
-## Comportamentos (Given/When/Then)
+## Comportamentos
 
-### Cenario: Buscar manifesto subindo diretorios
+### Cenario: Carregar manifesto v1 e normalizar para v2
 
-- **Given**: Arquivo `ahub.workspace.json` existe em `/projeto/raiz/` mas nao em `/projeto/raiz/src/app/`.
-- **When**: `findWorkspaceManifest('/projeto/raiz/src/app/')` e chamado.
-- **Then**: Retorna `'/projeto/raiz/ahub.workspace.json'`.
+- **Given**: O arquivo contem `{ "version": 1, "skills": [{ "name": "alpha", "targets": ["codex"] }] }`
+- **When**: `loadWorkspaceManifest(path)` e chamado
+- **Then**: O retorno em memoria usa `version: 2` e `contents: [{ type: 'skill', name: 'alpha', targets: ['codex'] }]`
 
-### Cenario: Buscar manifesto quando nenhum existe
+### Cenario: Carregar manifesto v2 com tipos mistos
 
-- **Given**: Nenhum arquivo `ahub.workspace.json` ou `.ahub.json` existe em nenhum diretorio ate a raiz.
-- **When**: `findWorkspaceManifest('/algum/caminho/')` e chamado.
-- **Then**: Retorna `null`.
+- **Given**: O arquivo contem `contents` com `skill/review`, `prompt/review` e `subagent/review`
+- **When**: `resolveManifestSkills(manifest)` e chamado
+- **Then**: As tres entradas coexistem sem colisao, cada uma preservando seu `type`
 
-### Cenario: Preferencia de nome de arquivo
+### Cenario: Mesclar groups.contents com contents
 
-- **Given**: Ambos `ahub.workspace.json` e `.ahub.json` existem no mesmo diretorio.
-- **When**: `findWorkspaceManifest()` e chamado a partir desse diretorio.
-- **Then**: Retorna o caminho para `ahub.workspace.json` (primeiro na lista de prioridade).
+- **Given**: O manifesto contem `groups: [{ targets: ['cursor'], contents: [{ type: 'skill', name: 'alpha' }] }]`
+- **And**: `contents: [{ type: 'skill', name: 'alpha', targets: ['codex'] }]`
+- **When**: `resolveManifestSkills(manifest)` e chamado
+- **Then**: `skill/alpha` aparece uma unica vez com `targets: ['codex', 'cursor']`
 
-### Cenario: Rejeitar manifesto com versao incorreta
+### Cenario: Salvar manifesto remove aliases legados
 
-- **Given**: Arquivo contém `{ "version": 2, "skills": [] }`.
-- **When**: `loadWorkspaceManifest(path)` e chamado.
-- **Then**: Lanca `Error` com mensagem `"Unsupported workspace manifest version: 2. Expected 1."`.
+- **Given**: O caller passa um objeto com `version: 1`, `skills[]` e `groups.skills[]`
+- **When**: `saveWorkspaceManifest(filePath, manifest)` e chamado
+- **Then**: O arquivo salvo usa `version: 2`, `contents[]` e `groups.contents[]`, sem reescrever `skills[]`
 
-### Cenario: Rejeitar target invalido em skill
+### Cenario: Fallback de targets continua igual
 
-- **Given**: Manifesto contém `{ "version": 1, "skills": [{ "name": "my-skill", "targets": ["vscode"] }] }`.
-- **When**: `loadWorkspaceManifest(path)` e chamado.
-- **Then**: Lanca `Error` com mensagem contendo `"Invalid target \"vscode\""`.
-
-### Cenario: Rejeitar nome de skill com path traversal
-
-- **Given**: Manifesto contém `{ "version": 1, "skills": [{ "name": "../evil" }] }`.
-- **When**: `loadWorkspaceManifest(path)` e chamado.
-- **Then**: Lanca `SkillValidationError` pois `assertSafeSkillName` rejeita o nome.
-
-### Cenario: Resolver skills com merge de targets entre groups e skills
-
-- **Given**: Manifesto contém:
-  - `groups: [{ targets: ['codex'], skills: ['skill-a'] }]`
-  - `skills: [{ name: 'skill-a', targets: ['cursor'] }]`
-- **When**: `resolveManifestSkills(manifest)` e chamado.
-- **Then**: `skill-a` aparece uma vez com `targets: ['codex', 'cursor']` (uniao, ordenado).
-
-### Cenario: Resolver skills com defaultTargets como fallback
-
-- **Given**: Manifesto contém `defaultTargets: ['codex']` e `skills: [{ name: 'my-skill' }]` (sem targets explicitos).
-- **When**: `resolveManifestSkills(manifest)` e chamado.
-- **Then**: `my-skill` recebe `targets: ['codex']` (herdado de `defaultTargets`).
-
-### Cenario: Fallback final para claude-code
-
-- **Given**: Manifesto sem `defaultTargets` e `skills: [{ name: 'my-skill' }]` (sem targets).
-- **When**: `resolveManifestSkills(manifest)` e chamado.
-- **Then**: `my-skill` recebe `targets: ['claude-code']` (fallback padrao).
-
-### Cenario: requireWorkspaceManifest sem manifesto
-
-- **Given**: Nenhum manifesto existe na arvore de diretorios.
-- **When**: `requireWorkspaceManifest('/projeto/app')` e chamado.
-- **Then**: Lanca `WorkspaceNotFoundError` com `searchDir` = `'/projeto/app'`.
-
-### Cenario: Profile vazio para projeto novo
-
-- **Given**: Arquivo `ahub.workspace.json` contem `{ "version": 1, "name": "app-novo", "skills": [] }`
-- **When**: `loadWorkspaceManifest(path)` e chamado e depois `resolveManifestSkills(manifest)`
-- **Then**: O manifesto e considerado valido e `resolveManifestSkills` retorna `[]`
+- **Given**: Um item de `contents[]` nao define `targets` e o manifesto nao define `defaultTargets`
+- **When**: `resolveManifestSkills(manifest)` e chamado
+- **Then**: O item recebe `targets: ['claude-code']`
 
 ## Contratos de Interface
 
@@ -102,74 +66,47 @@ Gerenciar o arquivo de workspace (`ahub.workspace.json` ou `.ahub.json`) que fun
 
 | Funcao | Entrada | Saida | Lanca |
 |--------|---------|-------|-------|
-| `findWorkspaceManifest(startDir?)` | `string` (opcional) | `Promise<string \| null>` | Erros de I/O |
-| `loadWorkspaceManifest(filePath)` | `string` | `Promise<WorkspaceManifest>` | `Error` (versao, targets invalidos), `SkillValidationError` (nomes) |
-| `requireWorkspaceManifest(startDir?)` | `string` (opcional) | `Promise<{ manifest, filePath }>` | `WorkspaceNotFoundError` |
+| `findWorkspaceManifest(startDir?)` | `string?` | `Promise<string \| null>` | Erros de I/O |
+| `loadWorkspaceManifest(filePath)` | `string` | `Promise<WorkspaceManifest>` | `Error`, `SkillValidationError` |
+| `requireWorkspaceManifest(startDir?)` | `string?` | `Promise<{ manifest, filePath }>` | `WorkspaceNotFoundError` |
 | `saveWorkspaceManifest(filePath, manifest)` | `string`, `WorkspaceManifest` | `Promise<void>` | Erros de I/O |
-| `resolveManifestSkills(manifest)` | `WorkspaceManifest` | `ResolvedSkill[]` | — (sincrono, puro) |
+| `resolveManifestContents(manifest)` | `WorkspaceManifest` | `ResolvedSkill[]` | — |
+| `resolveManifestSkills(manifest)` | `WorkspaceManifest` | `ResolvedSkill[]` | — |
 
-### Tipos Exportados
+### Tipos relevantes
 
-```typescript
-interface ResolvedSkill {
-  name: string;
-  targets: DeployTarget[];
-}
-```
-
-### Constantes Exportadas
-
-| Nome | Valor |
-|------|-------|
-| `WORKSPACE_FILENAMES` | `['ahub.workspace.json', '.ahub.json']` (readonly tuple) |
-
-### Tipos Utilizados (de `./types.js`)
-
-- `WorkspaceManifest` — shape do manifesto
-- `WorkspaceSkillEntry` — entrada individual de skill
-- `WorkspaceTargetGroup` — grupo de skills por target
-- `DeployTarget` — `'claude-code' | 'codex' | 'cursor'`
+- `ContentRef` — `{ type: 'skill' | 'prompt' | 'subagent', name: string }`
+- `WorkspaceContentEntry` — `ContentRef` com `targets?` e `source?`
+- `WorkspaceManifest` — `version: 2`, `contents[]`, `groups.contents[]` e aliases legados opcionais
 
 ## Dependencias
 
-| Modulo | Uso |
-|--------|-----|
-| `node:fs/promises` | `readFile`, `writeFile` |
-| `node:path` | `path.resolve`, `path.join`, `path.dirname`, `path.parse` |
-| `./types.js` | `DeployTarget`, `WorkspaceManifest`, `WorkspaceSkillEntry`, `WorkspaceTargetGroup` |
-| `./errors.js` | `WorkspaceNotFoundError` |
-| `./sanitize.js` | `assertSafeSkillName` |
-
-### Consumido por
-
-- `src/core/sync.ts` — `resolveManifestSkills` para obter lista flat de skills
-- `src/cli/commands/sync.ts` — `requireWorkspaceManifest` para carregar manifesto
-- `src/api/routes/workspace.ts` — endpoints REST de workspace
+- `node:fs/promises`
+- `node:path`
+- `src/core/types.ts`
+- `src/core/errors.ts`
+- `src/core/sanitize.ts`
 
 ## Efeitos Colaterais
 
-| Operacao | Efeito |
-|----------|--------|
-| `findWorkspaceManifest` | Leitura de filesystem (tenta abrir arquivos em cada diretorio ascendente) |
-| `loadWorkspaceManifest` | Leitura de um arquivo JSON do disco |
-| `saveWorkspaceManifest` | Escrita de arquivo JSON no disco |
-| `resolveManifestSkills` | Nenhum — funcao pura, sincrona |
+- `findWorkspaceManifest` faz leitura ascendente do filesystem.
+- `loadWorkspaceManifest` le e normaliza JSON do disco.
+- `saveWorkspaceManifest` grava JSON canonico `version: 2`.
+- `resolveManifestContents` e `resolveManifestSkills` sao funcoes puras.
 
 ## Decisoes de Design
 
 | Decisao | Motivo |
 |---------|--------|
-| Busca ascendente (como `.gitignore`) | Permite que subpastas herdem o manifesto do projeto pai |
-| Dois nomes aceitos (`ahub.workspace.json`, `.ahub.json`) | Flexibilidade — nome longo e explicito ou nome curto dot-file |
-| `version: 1` obrigatorio | Forward-compatibility — permite evolucao do schema sem quebrar |
-| Validacao de targets durante load (nao durante resolve) | Fail-fast na entrada — evita erros silenciosos durante sync |
-| Merge de targets por uniao (Set) | Permite compor targets de formas diferentes sem duplicatas |
-| Resultado ordenado alfabeticamente | Determinismo — mesma entrada sempre gera mesma saida |
-| `resolveManifestSkills` e sincrono e puro | Facilita testes e composicao; nao depende de I/O |
+| Canonico em `version: 2` com `contents[]` | Evita colisao entre `skill`, `prompt` e `subagent` com o mesmo slug |
+| Leitura dual de v1/v2 | Permite migracao gradual sem quebrar workspaces existentes |
+| Escrita somente no shape novo | Garante convergencia do ecossistema e reduz ambiguidade |
+| Alias `resolveManifestSkills` mantido | Reduz churn enquanto a base deixa de ser skill-centric |
 
 ## Changelog
 
 | Data | Mudanca |
 |------|---------|
 | 2026-03-05 | Spec criada |
-| 2026-03-06 | Documento reposicionado como profile de sync por projeto; registrado suporte explicito a workspace vazio |
+| 2026-03-06 | Documento reposicionado como profile de sync por projeto |
+| 2026-03-07 | Atualizada para manifesto canonico `version: 2` com `contents[]`, identidade `type + name` e compatibilidade de leitura com `skills[]` |

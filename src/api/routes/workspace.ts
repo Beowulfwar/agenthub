@@ -146,10 +146,10 @@ export function workspaceRoutes(): Hono {
         }
 
         const manifest: WorkspaceManifest = {
-          version: 1,
+          version: 2,
           name: fallbackName || path.basename(absDir),
           defaultTargets: ['claude-code'],
-          skills: adoptedSkills ?? [],
+          contents: adoptedSkills ?? [],
         };
         await saveWorkspaceManifest(manifestPath, manifest);
         created = true;
@@ -160,10 +160,10 @@ export function workspaceRoutes(): Hono {
 
       if (body.create) {
         const manifest: WorkspaceManifest = {
-          version: 1,
+          version: 2,
           name: fallbackName || path.basename(path.dirname(manifestPath)),
           defaultTargets: ['claude-code'],
-          skills: [],
+          contents: [],
         };
         await saveWorkspaceManifest(manifestPath, manifest);
         created = true;

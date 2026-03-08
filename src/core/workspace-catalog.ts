@@ -19,6 +19,7 @@ import type {
   WorkspaceSkillEntry,
 } from './types.js';
 import { listAgentApps } from './app-registry.js';
+import { formatContentRef } from './content-ref.js';
 import { detectLocalSkills } from './explorer.js';
 import { WorkspaceSkillReferenceError } from './errors.js';
 import { extractSkillExtensions } from './skill.js';
@@ -71,41 +72,56 @@ export interface AdoptLocalSkillsResult {
 export async function loadProviderSkillIndex(
   provider: StorageProvider,
 ): Promise<Map<string, ProviderSkillIndexEntry>> {
-  const names = await provider.list();
+  const refs = typeof provider.listContentRefs === 'function'
+    ? await provider.listContentRefs()
+    : (await provider.list()).map((name) => {
+      if (name.startsWith('prompt/')) return { type: 'prompt' as const, name: name.slice('prompt/'.length) };
+      if (name.startsWith('subagent/')) return { type: 'subagent' as const, name: name.slice('subagent/'.length) };
+      if (name.startsWith('skill/')) return { type: 'skill' as const, name: name.slice('skill/'.length) };
+      return { type: 'skill' as const, name };
+    });
+  const index = new Map<string, ProviderSkillIndexEntry>();
 
   const entries = await Promise.all(
-    names.map(async (name) => {
+    refs.map(async (ref) => {
       try {
-        const pkg = await provider.get(name);
+        const pkg = await provider.get(ref);
         const ext = extractSkillExtensions(pkg.skill);
-        return [
-          name,
-          {
+        return {
+          key: formatContentRef({ type: pkg.skill.type ?? ref.type, name: pkg.skill.name }),
+          value: {
             name: pkg.skill.name,
-            type: pkg.skill.type ?? 'skill',
+            type: pkg.skill.type ?? ref.type,
             description: pkg.skill.description ?? null,
             category: ext.category ?? null,
             tags: ext.tags ?? [],
             fileCount: pkg.files.length,
           } satisfies ProviderSkillIndexEntry,
-        ] as const;
+        } as const;
       } catch {
-        return [
-          name,
-          {
-            name,
-            type: 'skill',
+        return {
+          key: formatContentRef(ref),
+          value: {
+            name: ref.name,
+            type: ref.type,
             description: '(could not load)',
             category: null,
             tags: [],
             fileCount: 0,
           } satisfies ProviderSkillIndexEntry,
-        ] as const;
+        } as const;
       }
     }),
   );
 
-  return new Map(entries);
+  for (const entry of entries) {
+    index.set(entry.key, entry.value);
+    if (entry.value.type === 'skill') {
+      index.set(entry.value.name, entry.value);
+    }
+  }
+
+  return index;
 }
 
 export async function validateWorkspaceManifestSkills(
@@ -123,8 +139,8 @@ export async function validateWorkspaceManifestSkills(
   const missing: string[] = [];
 
   for (const skill of resolved) {
-    if (!(await provider.exists(skill.name))) {
-      missing.push(skill.name);
+    if (!(await provider.exists({ type: skill.type, name: skill.name }))) {
+      missing.push(formatContentRef(skill));
     }
   }
 
@@ -165,7 +181,7 @@ export async function buildWorkspaceCatalogEntry(
   const detectedByName = groupDetectedLocalSkills(detectedLocalSkills);
 
   for (const skill of resolvedSkills) {
-    configuredByName.set(skill.name, skill.targets);
+    configuredByName.set(formatContentRef(skill), skill.targets);
   }
 
   const skillNames = new Set<string>([
@@ -175,17 +191,18 @@ export async function buildWorkspaceCatalogEntry(
 
   const skills = [...skillNames]
     .sort((a, b) => a.localeCompare(b))
-    .map((name) => {
-      const configuredTargets = configuredByName.get(name) ?? [];
-      const detectedEntries = detectedByName.get(name) ?? [];
-      const providerSkill = providerIndex?.get(name) ?? null;
+    .map((key) => {
+      const ref = parseWorkspaceCatalogKey(key);
+      const configuredTargets = configuredByName.get(key) ?? [];
+      const detectedEntries = detectedByName.get(key) ?? [];
+      const providerSkill = providerIndex?.get(key) ?? providerIndex?.get(ref.name) ?? null;
       const configured = configuredTargets.length > 0;
       const detectedLocally = detectedEntries.length > 0;
       const existsInProvider = Boolean(providerSkill);
 
       return {
-        name,
-        type: providerSkill?.type ?? null,
+        name: ref.name,
+        type: providerSkill?.type ?? ref.type ?? null,
         description: providerSkill?.description ?? null,
         category: providerSkill?.category ?? null,
         tags: providerSkill?.tags ?? [],
@@ -234,7 +251,14 @@ export async function buildCloudSkillsCatalog(
     installState,
   } = params;
   const providerIndex = await loadProviderSkillIndex(provider);
-  const allSkills = [...providerIndex.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const allSkills = [...new Map(
+    [...providerIndex.entries()]
+      .filter(([key]) => key.includes('/'))
+      .map(([key, value]) => [key, value]),
+  ).values()].sort((a, b) => {
+    if (a.type !== b.type) return a.type.localeCompare(b.type);
+    return a.name.localeCompare(b.name);
+  });
 
   let workspaceName: string | null = null;
   let workspaceDir: string | null = null;
@@ -321,7 +345,7 @@ export async function buildWorkspaceAgentInventories(
     const configuredNames = new Set(
       resolved
         .filter((skill) => skill.targets.includes(targetDirectory.target))
-        .map((skill) => skill.name),
+        .map((skill) => formatContentRef(skill)),
     );
     const detectedForTarget = detectedLocalSkills.filter((skill) => skill.target === targetDirectory.target);
     const detectedByName = groupDetectedLocalSkills(detectedForTarget);
@@ -332,16 +356,17 @@ export async function buildWorkspaceAgentInventories(
 
     const skills = [...skillNames]
       .sort((a, b) => a.localeCompare(b))
-      .map((name) => {
-        const localEntries = detectedByName.get(name) ?? [];
-        const inManifest = configuredNames.has(name);
+      .map((key) => {
+        const ref = parseWorkspaceCatalogKey(key);
+        const localEntries = detectedByName.get(key) ?? [];
+        const inManifest = configuredNames.has(key);
         const installedLocally = localEntries.length > 0;
-        const providerSkill = providerIndex?.get(name) ?? null;
+        const providerSkill = providerIndex?.get(key) ?? providerIndex?.get(ref.name) ?? null;
         const existsInProvider = Boolean(providerSkill);
 
         return {
-          name,
-          type: providerSkill?.type ?? null,
+          name: ref.name,
+          type: providerSkill?.type ?? ref.type ?? null,
           description: providerSkill?.description ?? null,
           category: providerSkill?.category ?? null,
           tags: providerSkill?.tags ?? [],
@@ -391,9 +416,10 @@ export async function buildAdoptedManifestSkills(
   const skills: WorkspaceSkillEntry[] = [];
   const ignoredSkillNames: string[] = [];
 
-  for (const [name, detectedEntries] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (!(await provider.exists(name))) {
-      ignoredSkillNames.push(name);
+  for (const [key, detectedEntries] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const { type, name } = parseWorkspaceCatalogKey(key);
+    if (!(await provider.exists({ type, name }))) {
+      ignoredSkillNames.push(key);
       continue;
     }
 
@@ -403,7 +429,7 @@ export async function buildAdoptedManifestSkills(
         .filter((candidate): candidate is DeployTarget => Boolean(candidate)),
     )].sort();
 
-    skills.push(targets.length > 0 ? { name, targets } : { name });
+    skills.push(targets.length > 0 ? { type, name, targets } : { type, name });
   }
 
   return {
@@ -418,6 +444,7 @@ function buildCloudSkillCatalogItem(
   skill: ProviderSkillIndexEntry,
   installedNames: Set<string> | null,
 ): CloudSkillCatalogItem {
+  const contentId = formatContentRef({ type: skill.type, name: skill.name });
   return {
     name: skill.name,
     type: skill.type,
@@ -426,7 +453,7 @@ function buildCloudSkillCatalogItem(
     tags: skill.tags,
     fileCount: skill.fileCount,
     installState: installedNames
-      ? (installedNames.has(skill.name) ? 'installed' : 'not_installed')
+      ? (installedNames.has(contentId) ? 'installed' : 'not_installed')
       : 'unknown',
   };
 }
@@ -439,7 +466,7 @@ async function detectInstalledSkillNames(
   return new Set(
     localSkills
       .filter((skill) => skill.target === target)
-      .map((skill) => skill.name),
+      .map((skill) => formatContentRef({ type: resolveDetectedSkillType(skill), name: skill.name })),
   );
 }
 
@@ -506,7 +533,7 @@ function dedupeDetectedLocalSkills(entries: DetectedLocalSkill[]): DetectedLocal
   const map = new Map<string, DetectedLocalSkill>();
 
   for (const entry of entries) {
-    const key = `${entry.name}::${entry.tool}::${entry.absolutePath}`;
+    const key = `${resolveDetectedSkillType(entry)}::${entry.name}::${entry.tool}::${entry.absolutePath}`;
     if (!map.has(key)) {
       map.set(key, entry);
     }
@@ -516,22 +543,47 @@ function dedupeDetectedLocalSkills(entries: DetectedLocalSkill[]): DetectedLocal
 }
 
 function uniqueLocalSkillNames(entries: DetectedLocalSkill[]): Set<string> {
-  return new Set(entries.map((entry) => entry.name));
+  return new Set(entries.map((entry) => formatContentRef({ type: resolveDetectedSkillType(entry), name: entry.name })));
 }
 
 function groupDetectedLocalSkills(entries: DetectedLocalSkill[]): Map<string, DetectedLocalSkill[]> {
   const grouped = new Map<string, DetectedLocalSkill[]>();
 
   for (const entry of entries) {
-    const existing = grouped.get(entry.name);
+    const key = formatContentRef({ type: resolveDetectedSkillType(entry), name: entry.name });
+    const existing = grouped.get(key);
     if (existing) {
       existing.push(entry);
     } else {
-      grouped.set(entry.name, [entry]);
+      grouped.set(key, [entry]);
     }
   }
 
   return grouped;
+}
+
+function resolveDetectedSkillType(entry: DetectedLocalSkill): ContentType {
+  switch (entry.artifactKind) {
+    case 'prompt_file':
+      return 'prompt';
+    case 'subagent_file':
+      return 'subagent';
+    default:
+      return 'skill';
+  }
+}
+
+function parseWorkspaceCatalogKey(key: string): { type: ContentType; name: string } {
+  if (key.startsWith('prompt/')) {
+    return { type: 'prompt', name: key.slice('prompt/'.length) };
+  }
+  if (key.startsWith('subagent/')) {
+    return { type: 'subagent', name: key.slice('subagent/'.length) };
+  }
+  if (key.startsWith('skill/')) {
+    return { type: 'skill', name: key.slice('skill/'.length) };
+  }
+  return { type: 'skill', name: key };
 }
 
 function resolveCatalogPaths(

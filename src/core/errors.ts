@@ -75,6 +75,26 @@ export class AuthenticationError extends AhubError {
 }
 
 /**
+ * Thrown when a secure token store/keychain operation fails.
+ */
+export class SecretStoreError extends AhubError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SecretStoreError';
+  }
+}
+
+/**
+ * Thrown when a remote update cannot be applied because the current state diverged.
+ */
+export class ConflictError extends AhubError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ConflictError';
+  }
+}
+
+/**
  * Thrown when a data-migration step fails (config format upgrade,
  * cache schema change, etc.).
  */

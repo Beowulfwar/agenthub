@@ -35,12 +35,18 @@ export function createSourceCommand(): Command {
     .command('add')
     .description('Add a new storage source')
     .requiredOption('--id <id>', 'Unique source ID (kebab-case)')
-    .requiredOption('--provider <type>', 'Provider type: git, drive, or local')
+    .requiredOption('--provider <type>', 'Provider type: git, drive, github, or local')
     .option('--repo <url>', 'Git repository URL (for git provider)')
     .option('--branch <branch>', 'Git branch (default: main)')
     .option('--skills-dir <dir>', 'Skills subdirectory within repo (default: .)')
     .option('--dir <path>', 'Local directory path (for local provider)')
     .option('--folder <id>', 'Google Drive folder ID (for drive provider)')
+    .option('--owner <login>', 'GitHub owner/login (for github provider)')
+    .option('--repo-name <name>', 'GitHub repository name (for github provider)')
+    .option('--base-path <path>', 'Base path inside GitHub repository (default: .)')
+    .option('--account-login <login>', 'Authenticated GitHub account login (for github provider)')
+    .option('--account-id <id>', 'Authenticated GitHub account id (for github provider)')
+    .option('--visibility <visibility>', 'GitHub repository visibility: private or public')
     .option('--label <label>', 'Human-readable label')
     .action(async (opts) => {
       try {
@@ -76,6 +82,27 @@ export function createSourceCommand(): Command {
             source.local = {
               directory: opts.dir,
             };
+          break;
+
+          case 'github':
+            if (!opts.owner || !opts.repoName || !opts.accountLogin || !opts.accountId) {
+              console.error(
+                chalk.red(
+                  'Error: --owner, --repo-name, --account-login and --account-id are required for github provider.',
+                ),
+              );
+              process.exitCode = 1;
+              return;
+            }
+            source.github = {
+              owner: opts.owner,
+              repo: opts.repoName,
+              branch: opts.branch ?? 'main',
+              basePath: opts.basePath ?? '.',
+              accountLogin: opts.accountLogin,
+              accountId: opts.accountId,
+              visibility: opts.visibility === 'public' ? 'public' : 'private',
+            };
             break;
 
           case 'drive':
@@ -90,7 +117,7 @@ export function createSourceCommand(): Command {
             break;
 
           default:
-            console.error(chalk.red(`Error: Unknown provider "${opts.provider}". Use git, drive, or local.`));
+            console.error(chalk.red(`Error: Unknown provider "${opts.provider}". Use git, drive, github, or local.`));
             process.exitCode = 1;
             return;
         }
@@ -249,6 +276,8 @@ function getSourceDetail(source: SourceConfig): string {
       return source.drive?.folderId ?? '(no folder)';
     case 'local':
       return source.local?.directory ?? '(no directory)';
+    case 'github':
+      return source.github ? `${source.github.owner}/${source.github.repo}` : '(no repository)';
     default:
       return '';
   }

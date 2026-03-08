@@ -129,7 +129,7 @@ describe('loadWorkspaceManifest', () => {
     );
 
     const manifest = await loadWorkspaceManifest(filePath);
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
     expect(manifest.name).toBe('my-project');
     expect(manifest.skills).toHaveLength(1);
     expect(manifest.skills![0].name).toBe('skill-a');
@@ -283,8 +283,8 @@ describe('resolveManifestSkills', () => {
 
     const resolved = resolveManifestSkills(manifest);
     expect(resolved).toHaveLength(2);
-    expect(resolved[0]).toEqual({ name: 'alpha', targets: ['cursor'] });
-    expect(resolved[1]).toEqual({ name: 'beta', targets: ['cursor'] });
+    expect(resolved[0]).toEqual({ type: 'skill', name: 'alpha', targets: ['cursor'] });
+    expect(resolved[1]).toEqual({ type: 'skill', name: 'beta', targets: ['cursor'] });
   });
 
   it('uses per-skill target override', () => {
@@ -297,7 +297,7 @@ describe('resolveManifestSkills', () => {
     };
 
     const resolved = resolveManifestSkills(manifest);
-    expect(resolved[0].targets).toEqual(['codex', 'cursor']);
+    expect(resolved[0]).toEqual({ type: 'skill', name: 'override-skill', targets: ['codex', 'cursor'] });
   });
 
   it('falls back to claude-code when no defaultTargets', () => {
@@ -307,7 +307,7 @@ describe('resolveManifestSkills', () => {
     };
 
     const resolved = resolveManifestSkills(manifest);
-    expect(resolved[0].targets).toEqual(['claude-code']);
+    expect(resolved[0]).toEqual({ type: 'skill', name: 'fallback-skill', targets: ['claude-code'] });
   });
 
   it('resolves groups', () => {
@@ -320,8 +320,8 @@ describe('resolveManifestSkills', () => {
 
     const resolved = resolveManifestSkills(manifest);
     expect(resolved).toHaveLength(2);
-    expect(resolved[0]).toEqual({ name: 'grouped-a', targets: ['claude-code', 'codex'] });
-    expect(resolved[1]).toEqual({ name: 'grouped-b', targets: ['claude-code', 'codex'] });
+    expect(resolved[0]).toEqual({ type: 'skill', name: 'grouped-a', targets: ['claude-code', 'codex'] });
+    expect(resolved[1]).toEqual({ type: 'skill', name: 'grouped-b', targets: ['claude-code', 'codex'] });
   });
 
   it('merges targets when a skill appears in both groups and skills', () => {
@@ -385,9 +385,9 @@ describe('workspace manifest mutation helpers', () => {
     const updated = addTargetToManifest(manifest, 'alpha', 'codex');
 
     expect(resolveManifestSkills(updated)).toEqual([
-      { name: 'alpha', targets: ['claude-code', 'codex'] },
+      { type: 'skill', name: 'alpha', targets: ['claude-code', 'codex'] },
     ]);
-    expect(updated.skills).toEqual([{ name: 'alpha', targets: ['claude-code', 'codex'] }]);
+    expect(updated.skills).toEqual([{ type: 'skill', name: 'alpha', targets: ['claude-code', 'codex'] }]);
   });
 
   it('removeTargetFromManifest removes the skill entirely when no targets remain', () => {
@@ -413,12 +413,16 @@ describe('workspace manifest mutation helpers', () => {
     const updated = setSkillTargetsInManifest(manifest, 'alpha', ['cursor']);
 
     expect(updated.groups).toEqual([
-      { targets: ['claude-code', 'cursor'], skills: ['beta'] },
+      {
+        targets: ['claude-code', 'cursor'],
+        contents: [{ type: 'skill', name: 'beta' }],
+        skills: ['beta'],
+      },
     ]);
-    expect(updated.skills).toEqual([{ name: 'alpha', targets: ['cursor'] }]);
+    expect(updated.skills).toEqual([{ type: 'skill', name: 'alpha', targets: ['cursor'] }]);
     expect(resolveManifestSkills(updated)).toEqual([
-      { name: 'alpha', targets: ['cursor'] },
-      { name: 'beta', targets: ['claude-code', 'cursor'] },
+      { type: 'skill', name: 'alpha', targets: ['cursor'] },
+      { type: 'skill', name: 'beta', targets: ['claude-code', 'cursor'] },
     ]);
   });
 });

@@ -13,22 +13,30 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import { simpleGit, type SimpleGit } from 'simple-git';
 
 import type {
+  ContentPackage,
+  ContentRef,
   ContentType,
   GitConfig,
   HealthCheckResult,
-  SkillPackage,
 } from '../core/types.js';
 import { ALL_MARKER_FILES, MARKER_TO_TYPE } from '../core/types.js';
 import {
   AhubError,
   SkillNotFoundError,
 } from '../core/errors.js';
+import { parseContentRef, formatContentRef } from '../core/content-ref.js';
 import {
   loadSkillPackage,
   saveSkillPackage,
 } from '../core/skill.js';
 import { assertSafeSkillName } from '../core/sanitize.js';
 import type { ListOptions, StorageProvider } from './provider.js';
+
+const TYPE_DIRS: Record<ContentType, string> = {
+  skill: 'skills',
+  prompt: 'prompts',
+  subagent: 'subagents',
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -170,9 +178,31 @@ export class GitProvider implements StorageProvider {
       : path.join(this.localRoot, this.skillsDir);
   }
 
-  /** Absolute path to a specific skill directory. */
-  private skillDir(name: string): string {
+  private typeRoot(type: ContentType): string {
+    return path.join(this.skillsRoot, TYPE_DIRS[type]);
+  }
+
+  private canonicalDir(ref: ContentRef): string {
+    return path.join(this.typeRoot(ref.type), ref.name);
+  }
+
+  private legacyDir(name: string): string {
     return path.join(this.skillsRoot, name);
+  }
+
+  private normalizeRef(refOrName: string | ContentRef): ContentRef {
+    const ref = typeof refOrName === 'string' ? parseContentRef(refOrName, 'skill') : refOrName;
+    assertSafeSkillName(ref.name);
+    return ref;
+  }
+
+  private async detectLegacyType(dirPath: string): Promise<ContentType | null> {
+    for (const marker of ALL_MARKER_FILES) {
+      if (await isFile(path.join(dirPath, marker))) {
+        return MARKER_TO_TYPE[marker] ?? 'skill';
+      }
+    }
+    return null;
   }
 
   // ── StorageProvider implementation ─────────────────────────────────────
@@ -189,85 +219,109 @@ export class GitProvider implements StorageProvider {
   }
 
   async list(options?: string | ListOptions): Promise<string[]> {
+    const refs = await this.listContentRefs(options);
+    return refs.map((ref) => formatContentRef(ref));
+  }
+
+  async listContentRefs(options?: string | ListOptions): Promise<ContentRef[]> {
     const opts = typeof options === 'string' ? { query: options } : (options ?? {});
     await this.pullIfStale();
 
-    let entries: string[];
-    try {
-      const dirents = await readdir(this.skillsRoot, { withFileTypes: true });
-      entries = dirents
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch {
-      return [];
-    }
+    const refs = new Map<string, ContentRef>();
 
-    // Keep only directories that contain a known marker file.
-    const skills: string[] = [];
-    for (const name of entries) {
-      const dir = this.skillDir(name);
-      let detectedType: ContentType | null = null;
-
-      for (const marker of ALL_MARKER_FILES) {
-        if (await isFile(path.join(dir, marker))) {
-          detectedType = MARKER_TO_TYPE[marker] ?? 'skill';
-          break;
-        }
+    for (const type of Object.keys(TYPE_DIRS) as ContentType[]) {
+      const dirents = await readdir(this.typeRoot(type), { withFileTypes: true }).catch(() => []);
+      for (const entry of dirents) {
+        if (!entry.isDirectory()) continue;
+        const dir = path.join(this.typeRoot(type), entry.name);
+        if (!(await this.detectLegacyType(dir))) continue;
+        const ref = { type, name: entry.name } satisfies ContentRef;
+        refs.set(formatContentRef(ref), ref);
       }
-
-      if (detectedType === null) continue;
-      if (opts.type && detectedType !== opts.type) continue;
-
-      skills.push(name);
     }
 
+    const legacyEntries = await readdir(this.skillsRoot, { withFileTypes: true }).catch(() => []);
+    for (const entry of legacyEntries) {
+      if (!entry.isDirectory()) continue;
+      if ((Object.values(TYPE_DIRS) as string[]).includes(entry.name)) continue;
+      const dir = this.legacyDir(entry.name);
+      const type = await this.detectLegacyType(dir);
+      if (!type) continue;
+      const ref = { type, name: entry.name } satisfies ContentRef;
+      refs.set(formatContentRef(ref), ref);
+    }
+
+    let results = [...refs.values()].sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.name.localeCompare(b.name);
+    });
+
+    if (opts.type) {
+      results = results.filter((ref) => ref.type === opts.type);
+    }
     if (opts.query) {
       const lower = opts.query.toLowerCase();
-      return skills.filter((s) => s.toLowerCase().includes(lower));
+      results = results.filter((ref) =>
+        formatContentRef(ref).toLowerCase().includes(lower) || ref.name.toLowerCase().includes(lower),
+      );
     }
 
-    return skills.sort();
+    return results;
   }
 
-  async exists(name: string): Promise<boolean> {
-    await this.pullIfStale();
-    const dir = this.skillDir(name);
-
-    // Check for any known marker file.
-    for (const marker of ALL_MARKER_FILES) {
-      if (await isFile(path.join(dir, marker))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  async get(name: string): Promise<SkillPackage> {
-    assertSafeSkillName(name);
+  async exists(refOrName: string | ContentRef): Promise<boolean> {
+    const ref = this.normalizeRef(refOrName);
     await this.pullIfStale();
 
-    const dir = this.skillDir(name);
-    if (!(await this.exists(name))) {
-      throw new SkillNotFoundError(name);
+    if (await isDirectory(this.canonicalDir(ref))) {
+      return this.detectLegacyType(this.canonicalDir(ref)).then((detected) => detected === ref.type);
     }
 
-    return loadSkillPackage(dir);
+    return this.detectLegacyType(this.legacyDir(ref.name)).then((detected) => detected === ref.type);
   }
 
-  async put(pkg: SkillPackage): Promise<void> {
-    assertSafeSkillName(pkg.skill.name);
+  async get(refOrName: string | ContentRef): Promise<ContentPackage> {
+    const ref = this.normalizeRef(refOrName);
+    await this.pullIfStale();
+
+    const canonicalDir = this.canonicalDir(ref);
+    if (await isDirectory(canonicalDir)) {
+      const pkg = await loadSkillPackage(canonicalDir);
+      if (!pkg.skill.type) pkg.skill.type = ref.type;
+      return pkg;
+    }
+
+    const legacyDir = this.legacyDir(ref.name);
+    const detectedType = await this.detectLegacyType(legacyDir);
+    if (detectedType === ref.type) {
+      const pkg = await loadSkillPackage(legacyDir);
+      if (!pkg.skill.type) pkg.skill.type = detectedType;
+      return pkg;
+    }
+
+    throw new SkillNotFoundError(formatContentRef(ref));
+  }
+
+  async put(pkg: ContentPackage): Promise<void> {
+    const ref = this.normalizeRef({ type: pkg.skill.type ?? 'skill', name: pkg.skill.name });
     const git = await this.pullIfStale();
-    const dir = this.skillDir(pkg.skill.name);
+    const dir = this.canonicalDir(ref);
 
-    await saveSkillPackage(dir, pkg);
+    await saveSkillPackage(dir, {
+      ...pkg,
+      skill: {
+        ...pkg.skill,
+        type: ref.type,
+        name: ref.name,
+      },
+    });
 
     await git.add(dir);
     const status = await git.status();
     if (status.files.length === 0) {
       return; // nothing changed
     }
-    await git.commit(`Update skill: ${pkg.skill.name}`);
+    await git.commit(`Update content: ${formatContentRef(ref)}`);
     try {
       await git.push('origin', this.branch);
     } catch {
@@ -276,18 +330,23 @@ export class GitProvider implements StorageProvider {
     }
   }
 
-  async delete(name: string): Promise<void> {
-    assertSafeSkillName(name);
+  async delete(refOrName: string | ContentRef): Promise<void> {
+    const ref = this.normalizeRef(refOrName);
     const git = await this.pullIfStale();
-    const dir = this.skillDir(name);
+    let dir = this.canonicalDir(ref);
 
     if (!(await isDirectory(dir))) {
-      throw new SkillNotFoundError(name);
+      const legacyDir = this.legacyDir(ref.name);
+      const detectedType = await this.detectLegacyType(legacyDir);
+      if (detectedType !== ref.type) {
+        throw new SkillNotFoundError(formatContentRef(ref));
+      }
+      dir = legacyDir;
     }
 
     await rm(dir, { recursive: true, force: true });
     await git.add(['-A', dir]);
-    await git.commit(`Remove skill: ${name}`);
+    await git.commit(`Remove content: ${formatContentRef(ref)}`);
     try {
       await git.push('origin', this.branch);
     } catch {
@@ -296,10 +355,10 @@ export class GitProvider implements StorageProvider {
     }
   }
 
-  async *exportAll(): AsyncIterable<SkillPackage> {
-    const names = await this.list();
-    for (const name of names) {
-      yield await this.get(name);
+  async *exportAll(): AsyncIterable<ContentPackage> {
+    const refs = await this.listContentRefs();
+    for (const ref of refs) {
+      yield await this.get(ref);
     }
   }
 }

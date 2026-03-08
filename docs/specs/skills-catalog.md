@@ -1,92 +1,86 @@
 # skills-catalog
 
-> Spec comportamental — hub operacional de skills exibido na tela `/skills`.
+> Spec comportamental — hub operacional de conteudos exibido na rota `/skills`.
 
 ## Proposito
 
-Definir `/skills` como a superficie principal para operar skills entre nuvem e workspaces locais. A tela parte da divisao explicita entre `Nuvem` e `Workspaces`, mostra cada workspace por agente e oferece as acoes gerenciadas de baixar, subir, copiar, mover e comparar.
+Definir `/skills` como alias de produto para o hub principal de conteudos. A tela continua na mesma rota, mas agora opera `skill`, `prompt` e `subagent` como entidades de primeira classe, mantendo `rules` locais em uma secao separada por workspace.
 
 ## Localizacao
 
 - **UI**: `ui/src/pages/SkillsPage.tsx`, `ui/src/pages/SkillDetailPage.tsx`, `ui/src/components/deploy/DeployDialog.tsx`
 - **Hooks**: `ui/src/hooks/useSkills.ts`
 - **API consumida**: `src/api/routes/skills.ts`
-- **Core**: `src/core/skills-hub.ts`, `src/core/workspace.ts`
+- **Core**: `src/core/skills-hub.ts`, `src/core/workspace.ts`, `src/core/local-rules.ts`
 
 ## Invariantes
 
-1. `/skills` usa `GET /api/skills/hub` como shell de leitura e `GET /api/skills/hub/workspace` para expandir cada workspace sob demanda.
-2. A tela sempre separa `Nuvem` e `Workspaces`; quando recolhidos, apenas os cabecalhos dessas secoes ficam visiveis.
-3. `Nuvem` lista cada skill global uma unica vez, porque o provider continua sendo a autoridade de nomes.
-4. Cada workspace expandido agrupa o inventario local por agente (`Codex`, `Claude Code`, `Cursor`), sem misturar agentes no mesmo bloco.
-5. O estado unificado das skills no hub e um dentre: `synced`, `cloud_only`, `local_only`, `diverged`, `missing_in_provider`.
-6. O estado da skill nao substitui a informacao de manifesto; a UI continua exibindo separadamente se a skill esta ou nao vinculada ao manifesto do workspace.
-7. `Baixar` sempre significa `nuvem -> workspace + agente`, com atualizacao do manifesto e deploy imediato.
-8. `Subir` sempre significa `workspace + agente -> nuvem`; se a skill estiver `diverged`, a UI exige comparacao e confirmacao antes de sobrescrever.
-9. `Copiar` preserva a origem e adiciona a skill ao destino; `Mover` faz `Copiar` e depois remove o target da origem com `undeploy`.
-10. `/skills/:name` continua representando a definicao global da skill, mas o CTA principal passa a ser “Baixar para workspace”.
+1. `/skills` usa `GET /api/skills/hub` como shell de leitura e `GET /api/skills/hub/workspace` para expandir workspaces sob demanda.
+2. A identidade de selecao no hub e `contentId = type/name`; a UI nao depende mais de `name` puro.
+3. A secao `Nuvem` lista conteudos globais unicos, com filtro por tipo.
+4. Cada workspace expandido separa `Contents` (cloud-backed) e `Rules` (inventario local por app).
+5. `Contents` continuam agrupados por agente (`Codex`, `Claude Code`, `Cursor`) com estados `synced`, `cloud_only`, `local_only`, `diverged`, `missing_in_provider`.
+6. `Rules` nunca executam acoes cloud; mostram apenas inventario local, `source = projected|local` e suporte de escrita do app.
+7. Regras projetadas de `Cursor` podem coexistir com a secao de conteudos; elas aparecem em `Rules` para auditoria local, nao para substituir o hub cloud-backed.
+8. Download, upload, copia, movimento e diff passam `contents[]` para a API, preservando alias legados apenas por compatibilidade.
+9. A rota de detalhe canonica e `/skills/:type/:name`, com `/skills/:name` mantida como alias legado de `skill`.
+10. O workspace form salva manifesto em `version: 2` com `contents[]`, sem apagar `prompts` e `subagents`.
 
-## Comportamentos (Given/When/Then)
+## Comportamentos
 
-### Cenario: Abrir o hub recolhido
+### Cenario: Filtrar por tipo na nuvem
 
-- **Given**: Existem skills no provider e workspaces registrados
-- **When**: O usuario abre `/skills`
-- **Then**: A pagina mostra um cabecalho para `Nuvem` e um cabecalho para cada workspace, sem cards de skill visiveis enquanto os blocos estiverem recolhidos
+- **Given**: O provider contem `skill/review`, `prompt/review` e `subagent/review`
+- **When**: O usuario filtra `Tipo = prompt`
+- **Then**: A lista de `Nuvem` mostra apenas `prompt/review`
 
-### Cenario: Expandir a nuvem
+### Cenario: Selecionar dois conteudos com mesmo slug
 
-- **Given**: O provider contem skills disponiveis
-- **When**: O usuario expande a secao `Nuvem`
-- **Then**: A lista mostra skills globais unicas, com busca/filtro por tipo e acao `Baixar para...`
+- **Given**: Existem `skill/review` e `prompt/review`
+- **When**: O usuario seleciona ambos na secao `Nuvem`
+- **Then**: As acoes em lote preservam as duas identidades sem colisao de checkbox, diff ou download
 
 ### Cenario: Expandir um workspace
 
 - **Given**: Existe um workspace registrado com inventario local
 - **When**: O usuario expande esse workspace
-- **Then**: A UI carrega sob demanda o detalhe do workspace e renderiza um painel separado por agente, cada um com contadores e lista de skills
+- **Then**: A UI renderiza blocos por agente em `Contents` e uma secao adicional `Rules locais por app`
 
-### Cenario: Baixar da nuvem para um destino
+### Cenario: Editar rule local do Cursor
 
-- **Given**: O usuario escolheu uma ou mais skills da nuvem e um `workspace + agente`
-- **When**: Confirma a operacao `Baixar`
-- **Then**: A skill e adicionada ao manifesto do workspace, baixada do provider e escrita no diretorio local do agente
+- **Given**: O workspace possui uma rule em `.cursor/rules/review.md`
+- **When**: O usuario usa `Editar` na secao `Rules`
+- **Then**: A UI abre um editor local, salva o arquivo no workspace e recarrega o detalhe sem tocar na nuvem
 
-### Cenario: Comparar uma skill divergente
+### Cenario: App detect-only continua leitura
 
-- **Given**: Uma skill local difere da versao da nuvem
-- **When**: O usuario clica em `Comparar`
-- **Then**: A UI abre um modal com preview lado a lado de `Local` e `Nuvem`, sem sobrescrever nada automaticamente
+- **Given**: O workspace possui rules detectadas para `Windsurf` ou `Continue`
+- **When**: O usuario expande a secao `Rules`
+- **Then**: As rules aparecem com status de inventario, mas sem botoes de edicao/remocao
 
-### Cenario: Confirmar upload apos comparacao
+### Cenario: Abrir detalhe tipado
 
-- **Given**: O modal de comparacao foi aberto para uma skill `diverged`
-- **When**: O usuario confirma `Subir para nuvem`
-- **Then**: A API usa a versao local canonicalizada e envia ao provider com `force=true`, registrando warning quando a origem local for lossless/lossy
-
-### Cenario: Mover skill entre workspaces
-
-- **Given**: Uma skill local existe em `workspace A + agente X`
-- **When**: O usuario escolhe `Mover para...` e confirma um `workspace B + agente Y`
-- **Then**: A skill e escrita no destino, o manifesto do destino recebe o novo target, e a origem e removida do manifesto com `undeploy`
+- **Given**: O usuario clica em `prompt/review` na secao `Nuvem`
+- **When**: A UI navega para o detalhe
+- **Then**: A rota aberta e `/skills/prompt/review`, e clone/rename/delete continuam operando sobre essa identidade tipada
 
 ## Decisoes de Design
 
 | Decisao | Motivo |
 |---------|--------|
-| `/skills` como hub operacional | Reduz a ida e volta entre catalogo cloud-first e diagnostico local |
-| Accordion multi-expand | Mantem a tela limpa quando recolhida e permite trabalhar em varios workspaces ao mesmo tempo |
-| Comparacao obrigatoria para `diverged` | Impede sobrescrita silenciosa entre disco local e provider |
-| Selecao + envio no primeiro corte | E mais clara e acessivel do que drag-and-drop para operacoes potencialmente destrutivas |
-| Read model proprio para `/skills` | Evita reconstruir no frontend a relacao entre provider, manifesto, disco e formato de cada agente |
+| Manter a rota `/skills` | Preserva descoberta do produto enquanto o vocabulário migra para “conteudos” |
+| Selecao por `contentId` | Resolve o problema real de colisao entre tipos diferentes com o mesmo slug |
+| `Rules` em secao separada | Torna visivel o estado local por workspace sem misturar regra local com catalogo cloud-backed |
+| CRUD local inicial so para Cursor | Fecha o caso principal com layout oficial conhecido |
 
 ## Referencias de codigo
 
 - `src/core/skills-hub.ts`
-- `src/core/workspace.ts`
+- `src/core/local-rules.ts`
 - `src/api/routes/skills.ts`
 - `ui/src/pages/SkillsPage.tsx`
 - `ui/src/pages/SkillDetailPage.tsx`
+- `ui/src/components/workspace/WorkspaceForm.tsx`
 - `tests/core/skills-hub.test.ts`
 - `tests/core/workspace.test.ts`
 
@@ -94,6 +88,6 @@ Definir `/skills` como a superficie principal para operar skills entre nuvem e w
 
 | Data | Mudanca |
 |------|---------|
-| 2026-03-06 | Spec criada para documentar o agrupamento de skills por workspace na tela `/skills` |
-| 2026-03-07 | Reescrita para o modelo cloud-first com itens unicos, destino explicito `workspace + agente` e instalacao em lote |
-| 2026-03-07 | Atualizada para o modelo de hub operacional com secoes `Nuvem` e `Workspaces`, comparacao obrigatoria de divergencia e acoes gerenciadas de download/upload/transfer |
+| 2026-03-06 | Spec criada para o hub operacional na rota `/skills` |
+| 2026-03-07 | Atualizada para o modelo cloud-first com instalacao em lote |
+| 2026-03-07 | Reescrita para o hub de conteudos com identidade `type/name`, detalhe tipado e rules locais por workspace |

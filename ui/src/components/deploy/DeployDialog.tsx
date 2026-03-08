@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { X, Download, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useDeploy } from '../../hooks/useDeploy';
+import { useSkillsHubDownload } from '../../hooks/useSkills';
 import { useWorkspaceRegistry } from '../../hooks/useWorkspace';
 import { cn } from '../../lib/utils';
-import type { DeployTarget } from '../../api/types';
+import type { ContentRef, DeployTarget } from '../../api/types';
 
 interface DeployDialogProps {
-  skillNames: string[];
+  contentRefs: ContentRef[];
   onClose: () => void;
   initialWorkspaceFilePath?: string;
   initialTarget?: DeployTarget;
@@ -21,7 +21,7 @@ const TARGETS: Array<{ value: DeployTarget; label: string; className: string }> 
 ];
 
 export function DeployDialog({
-  skillNames,
+  contentRefs,
   onClose,
   initialWorkspaceFilePath,
   initialTarget,
@@ -29,7 +29,7 @@ export function DeployDialog({
 }: DeployDialogProps) {
   const [workspaceFilePath, setWorkspaceFilePath] = useState(initialWorkspaceFilePath ?? '');
   const [target, setTarget] = useState<DeployTarget | ''>(initialTarget ?? '');
-  const deployMutation = useDeploy();
+  const downloadMutation = useSkillsHubDownload();
   const workspaceRegistry = useWorkspaceRegistry();
 
   const selectedWorkspace = useMemo(
@@ -41,27 +41,28 @@ export function DeployDialog({
 
     const handleDeploy = () => {
     if (!workspaceFilePath || !target) {
-      toast.error('Selecione um workspace e um agente para baixar as skills');
+      toast.error('Selecione um workspace e um agente para baixar os conteudos');
       return;
     }
 
-    deployMutation.mutate(
+    downloadMutation.mutate(
       {
-        skills: skillNames,
-        workspaceFilePath,
+        filePath: workspaceFilePath,
         target,
+        contents: contentRefs,
+        skills: contentRefs.map((ref) => `${ref.type}/${ref.name}`),
       },
       {
         onSuccess: (result) => {
           if (result.failed.length === 0) {
-            toast.success(`${result.deployed.length} skill(s) baixada(s) com sucesso`);
+            toast.success(`${result.successful.length} conteudo(s) baixado(s) com sucesso`);
           } else {
-            toast.warning(`Baixadas ${result.deployed.length}, com ${result.failed.length} falha(s)`);
+            toast.warning(`Baixados ${result.successful.length}, com ${result.failed.length} falha(s)`);
           }
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar as skills');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar os conteudos');
         },
       },
     );
@@ -71,7 +72,7 @@ export function DeployDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Baixar skills para workspace</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Baixar conteudos para workspace</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
@@ -79,15 +80,15 @@ export function DeployDialog({
 
         <div className="mt-4">
           <p className="text-sm text-gray-500">
-            {skillNames.length} skill{skillNames.length !== 1 ? 's' : ''} selecionada{skillNames.length !== 1 ? 's' : ''}:
+            {contentRefs.length} conteudo{contentRefs.length !== 1 ? 's' : ''} selecionado{contentRefs.length !== 1 ? 's' : ''}:
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {skillNames.map((name) => (
+            {contentRefs.map((ref) => (
               <span
-                key={name}
+                key={`${ref.type}/${ref.name}`}
                 className="rounded bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
               >
-                {name}
+                {ref.type}/{ref.name}
               </span>
             ))}
           </div>
@@ -151,18 +152,18 @@ export function DeployDialog({
           </div>
         )}
 
-        {deployMutation.data && (
+        {downloadMutation.data && (
           <div className="mt-4 space-y-1 rounded-lg bg-gray-50 p-3 text-xs">
-            {deployMutation.data.deployed.map((entry, index) => (
-              <div key={`${entry.skill}-${entry.target}-${index}`} className="flex items-center gap-1.5 text-green-700">
+            {downloadMutation.data.successful.map((entry, index) => (
+              <div key={`${entry.contentId}-${entry.target}-${index}`} className="flex items-center gap-1.5 text-green-700">
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                {entry.skill} → {entry.target}
+                {entry.contentId} → {entry.target}
               </div>
             ))}
-            {deployMutation.data.failed.map((entry, index) => (
-              <div key={`${entry.skill}-${entry.target}-${index}`} className="flex items-center gap-1.5 text-red-700">
+            {downloadMutation.data.failed.map((entry, index) => (
+              <div key={`${entry.contentId}-${entry.target}-${index}`} className="flex items-center gap-1.5 text-red-700">
                 <XCircle className="h-3.5 w-3.5" />
-                {entry.skill} → {entry.target}: {entry.error}
+                {entry.contentId} → {entry.target}: {entry.error}
               </div>
             ))}
           </div>
@@ -177,11 +178,11 @@ export function DeployDialog({
           </button>
           <button
             onClick={handleDeploy}
-            disabled={deployMutation.isPending || !ready}
+            disabled={downloadMutation.isPending || !ready}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
-            {deployMutation.isPending ? 'Baixando...' : 'Baixar no destino'}
+            {downloadMutation.isPending ? 'Baixando...' : 'Baixar no destino'}
           </button>
         </div>
       </div>

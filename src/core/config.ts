@@ -425,6 +425,28 @@ export async function addSource(source: SourceConfig): Promise<void> {
 }
 
 /**
+ * Insert or replace a source by ID.
+ */
+export async function upsertSource(source: SourceConfig): Promise<void> {
+  const cfg = await ensureV2Config();
+  const sources = cfg.sources ?? [];
+  const idx = sources.findIndex((s) => s.id === source.id);
+
+  if (idx === -1) {
+    sources.push(source);
+  } else {
+    sources[idx] = source;
+  }
+
+  cfg.sources = sources;
+  if (!cfg.defaultSource) {
+    cfg.defaultSource = source.id;
+  }
+
+  await saveConfig(cfg);
+}
+
+/**
  * Remove a source by ID.
  * Throws if the source does not exist.
  */

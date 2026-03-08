@@ -1,14 +1,18 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRightLeft,
   ChevronDown,
   Cloud,
+  FilePenLine,
+  FilePlus2,
   Download,
   FolderKanban,
   GitCompare,
   Layers3,
   MoveRight,
+  Shield,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,14 +26,22 @@ import {
   useSkillsHubTransfer,
   useSkillsHubUpload,
   useSkillsHubWorkspace,
+  useDeleteWorkspaceRule,
+  useSaveWorkspaceRule,
+  useWorkspaceRuleContent,
 } from '../hooks/useSkills';
 import { cn } from '../lib/utils';
 import type {
+  AgentAppId,
+  ContentRef,
+  ContentType,
   DeployTarget,
   SkillsHubCloudItem,
   SkillsHubDiffResult,
   SkillsHubStatus,
   SkillsHubWorkspaceAgentDetail,
+  SkillsHubWorkspaceRule,
+  SkillsHubWorkspaceRulesSection,
   SkillsHubWorkspaceSkill,
   SkillsHubWorkspaceSummary,
 } from '../api/types';
@@ -75,7 +87,7 @@ const STATUS_META: Record<SkillsHubStatus, { label: string; className: string }>
 type TransferDialogState =
   | {
       mode: 'copy' | 'move';
-      skills: string[];
+      contents: ContentRef[];
       sourceWorkspaceFilePath: string;
       sourceTarget: DeployTarget;
     }
@@ -109,17 +121,17 @@ export function SkillsPage() {
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-2xl font-semibold text-gray-900">Hub de skills</h1>
+            <h1 className="text-2xl font-semibold text-gray-900">Hub de conteudos</h1>
             <p className="mt-1 text-sm text-gray-500">
               A nuvem continua sendo a base oficial, mas a operacao agora acontece aqui:
               veja workspaces por agente, compare divergencias, baixe, suba, copie e mova
-              skills sem sair desta tela.
+              conteudos sem sair desta tela.
             </p>
           </div>
           {hub.data && (
             <div className="grid gap-3 sm:grid-cols-3">
               <SummaryCard
-                title="Skills na nuvem"
+                title="Conteudos na nuvem"
                 value={hub.data.cloud.total}
                 hint="Inventario oficial do provider"
               />
@@ -131,7 +143,7 @@ export function SkillsPage() {
               <SummaryCard
                 title="Divergencias"
                 value={hub.data.workspaces.reduce((sum, workspace) => sum + workspace.counts.diverged, 0)}
-                hint="Skills que exigem comparacao antes de sobrescrever"
+                hint="Conteudos que exigem comparacao antes de sobrescrever"
               />
             </div>
           )}
@@ -159,12 +171,12 @@ export function SkillsPage() {
       </section>
 
       {hub.isLoading && (
-        <LoadingSpinner className="py-20" size="lg" label="Carregando hub de skills..." />
+        <LoadingSpinner className="py-20" size="lg" label="Carregando hub de conteudos..." />
       )}
 
       {hub.error && (
         <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          {hub.error instanceof Error ? hub.error.message : 'Nao foi possivel carregar o hub de skills'}
+          {hub.error instanceof Error ? hub.error.message : 'Nao foi possivel carregar o hub de conteudos'}
         </div>
       )}
 
@@ -181,7 +193,7 @@ export function SkillsPage() {
             <EmptyState
               icon={<FolderKanban className="h-12 w-12" />}
               title="Nenhum workspace registrado"
-              description="Cadastre um workspace em /workspace para operar skills locais aqui."
+              description="Cadastre um workspace em /workspace para operar conteudos locais aqui."
             />
           ) : (
             <section className="space-y-4">
@@ -216,21 +228,24 @@ function CloudAccordionSection({
   const [selected, setSelected] = useState<string[]>([]);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
 
-  const selectedNames = useMemo(
-    () => selected.filter((name) => cloudItems.some((item) => item.name === name)),
+  const selectedContents = useMemo(
+    () => selected
+      .map((contentId) => cloudItems.find((item) => item.contentId === contentId))
+      .filter((item): item is SkillsHubCloudItem => Boolean(item))
+      .map((item) => ({ type: item.type, name: item.name })),
     [cloudItems, selected],
   );
 
-  const toggleSelection = (name: string) => {
+  const toggleSelection = (contentId: string) => {
     setSelected((prev) => (
-      prev.includes(name)
-        ? prev.filter((entry) => entry !== name)
-        : [...prev, name]
+      prev.includes(contentId)
+        ? prev.filter((entry) => entry !== contentId)
+        : [...prev, contentId]
     ));
   };
 
-  const openSingleDownload = (name: string) => {
-    setSelected([name]);
+  const openSingleDownload = (contentId: string) => {
+    setSelected([contentId]);
     setShowDownloadDialog(true);
   };
 
@@ -247,7 +262,7 @@ function CloudAccordionSection({
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-gray-900">Nuvem</h2>
             <p className="text-sm text-gray-500">
-              {cloudItems.length} skill{cloudItems.length === 1 ? '' : 's'} disponivel{cloudItems.length === 1 ? '' : 'eis'} no provider oficial
+              {cloudItems.length} conteudo{cloudItems.length === 1 ? '' : 's'} disponivel{cloudItems.length === 1 ? '' : 'eis'} no provider oficial
             </p>
           </div>
         </div>
@@ -264,27 +279,27 @@ function CloudAccordionSection({
         <div className="border-t border-gray-200 px-5 py-4">
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p className="text-sm text-gray-500">
-              Expanda a nuvem para descobrir novas skills e baixar para qualquer workspace/agente.
+              Expanda a nuvem para descobrir novos conteudos e baixar para qualquer workspace/agente.
             </p>
             <button
               onClick={() => setShowDownloadDialog(true)}
-              disabled={selectedNames.length === 0}
+              disabled={selectedContents.length === 0}
               className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
-              Baixar para... ({selectedNames.length})
+              Baixar para... ({selectedContents.length})
             </button>
           </div>
 
           {cloudItems.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-sm text-gray-500">
-              Nenhuma skill encontrada com os filtros atuais.
+              Nenhum conteudo encontrado com os filtros atuais.
             </div>
           ) : (
             <div className="space-y-3">
               {cloudItems.map((item) => (
                 <div
-                  key={item.name}
+                  key={item.contentId}
                   className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
                 >
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -292,12 +307,12 @@ function CloudAccordionSection({
                       <div className="flex flex-wrap items-center gap-2">
                         <input
                           type="checkbox"
-                          checked={selectedNames.includes(item.name)}
-                          onChange={() => toggleSelection(item.name)}
+                          checked={selected.includes(item.contentId)}
+                          onChange={() => toggleSelection(item.contentId)}
                           className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                         />
                         <Link
-                          to={`/skills/${encodeURIComponent(item.name)}`}
+                          to={`/skills/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
                           className="truncate text-sm font-semibold text-gray-900 hover:text-brand-700"
                         >
                           {item.name}
@@ -336,7 +351,7 @@ function CloudAccordionSection({
                         </span>
                       )}
                       <button
-                        onClick={() => openSingleDownload(item.name)}
+                        onClick={() => openSingleDownload(item.contentId)}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
                       >
                         <Download className="h-3.5 w-3.5" />
@@ -353,7 +368,7 @@ function CloudAccordionSection({
 
       {showDownloadDialog && (
         <DownloadToWorkspaceDialog
-          skills={selectedNames}
+          contents={selectedContents}
           workspaces={workspaces}
           onClose={() => setShowDownloadDialog(false)}
         />
@@ -432,6 +447,22 @@ function WorkspaceAccordionSection({
                   allWorkspaces={allWorkspaces}
                 />
               ))}
+
+              {detail.data.rules.length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-400" />
+                    <h3 className="text-sm font-semibold text-gray-700">Rules locais por app</h3>
+                  </div>
+                  {detail.data.rules.map((section) => (
+                    <RulesSection
+                      key={`${detail.data.filePath}-${section.appId}`}
+                      workspace={summary}
+                      section={section}
+                    />
+                  ))}
+                </section>
+              )}
             </div>
           ) : null}
         </div>
@@ -452,20 +483,20 @@ function AgentSection({
   const [selected, setSelected] = useState<string[]>([]);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [transferDialog, setTransferDialog] = useState<TransferDialogState>(null);
-  const [compareSkill, setCompareSkill] = useState<string | null>(null);
+  const [compareContent, setCompareContent] = useState<ContentRef | null>(null);
   const uploadMutation = useSkillsHubUpload();
 
   const selectedSkills = useMemo(
-    () => agent.skills.filter((skill) => selected.includes(skill.name)),
+    () => agent.skills.filter((skill) => selected.includes(skill.contentId)),
     [agent.skills, selected],
   );
   const hasDivergedSelection = selectedSkills.some((skill) => skill.status === 'diverged');
 
-  const toggleSelection = (name: string) => {
+  const toggleSelection = (contentId: string) => {
     setSelected((prev) => (
-      prev.includes(name)
-        ? prev.filter((entry) => entry !== name)
-        : [...prev, name]
+      prev.includes(contentId)
+        ? prev.filter((entry) => entry !== contentId)
+        : [...prev, contentId]
     ));
   };
 
@@ -474,7 +505,7 @@ function AgentSection({
       return;
     }
     if (hasDivergedSelection) {
-      toast.error('Compare cada skill divergente individualmente antes de subir para a nuvem.');
+      toast.error('Compare cada conteudo divergente individualmente antes de subir para a nuvem.');
       return;
     }
 
@@ -482,7 +513,8 @@ function AgentSection({
       {
         filePath: workspace.filePath,
         target: agent.target,
-        skills: selectedSkills.map((skill) => skill.name),
+        contents: selectedSkills.map((skill) => ({ type: skill.type ?? 'skill', name: skill.name })),
+        skills: selectedSkills.map((skill) => skill.contentId),
       },
       {
         onSuccess: (result) => {
@@ -490,7 +522,7 @@ function AgentSection({
           setSelected([]);
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir as skills');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir os conteudos');
         },
       },
     );
@@ -505,7 +537,7 @@ function AgentSection({
               {agent.label}
             </span>
             <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-gray-600 ring-1 ring-inset ring-gray-200">
-              {agent.skills.length} skill{agent.skills.length === 1 ? '' : 's'}
+              {agent.skills.length} conteudo{agent.skills.length === 1 ? '' : 's'}
             </span>
           </div>
           <p className="mt-2 break-all font-mono text-xs text-gray-500">{agent.skillPath}</p>
@@ -531,7 +563,7 @@ function AgentSection({
           <button
             onClick={() => setTransferDialog({
               mode: 'copy',
-              skills: selectedSkills.map((skill) => skill.name),
+              contents: selectedSkills.map((skill) => ({ type: skill.type ?? 'skill', name: skill.name })),
               sourceWorkspaceFilePath: workspace.filePath,
               sourceTarget: agent.target,
             })}
@@ -544,7 +576,7 @@ function AgentSection({
           <button
             onClick={() => setTransferDialog({
               mode: 'move',
-              skills: selectedSkills.map((skill) => skill.name),
+              contents: selectedSkills.map((skill) => ({ type: skill.type ?? 'skill', name: skill.name })),
               sourceWorkspaceFilePath: workspace.filePath,
               sourceTarget: agent.target,
             })}
@@ -559,25 +591,25 @@ function AgentSection({
 
       {hasDivergedSelection && (
         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          O upload em lote ignora sobrescrita automatica. Compare cada skill divergente individualmente antes de confirmar.
+          O upload em lote ignora sobrescrita automatica. Compare cada conteudo divergente individualmente antes de confirmar.
         </div>
       )}
 
       {agent.skills.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-8 text-sm text-gray-500">
-          Nenhuma skill detectada para este agente.
+          Nenhum conteudo detectado para este agente.
         </div>
       ) : (
         <div className="mt-4 space-y-3">
           {agent.skills.map((skill) => (
-            <div key={`${workspace.filePath}-${agent.target}-${skill.name}`} className="rounded-2xl border border-gray-200 bg-white p-4">
+            <div key={`${workspace.filePath}-${agent.target}-${skill.contentId}`} className="rounded-2xl border border-gray-200 bg-white p-4">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={selected.includes(skill.name)}
-                      onChange={() => toggleSelection(skill.name)}
+                      checked={selected.includes(skill.contentId)}
+                      onChange={() => toggleSelection(skill.contentId)}
                       className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                     />
                     <span className="truncate text-sm font-semibold text-gray-900">{skill.name}</span>
@@ -633,7 +665,7 @@ function AgentSection({
                   {(skill.status === 'cloud_only') && (
                     <button
                       onClick={() => {
-                        setSelected([skill.name]);
+                        setSelected([skill.contentId]);
                         setShowDownloadDialog(true);
                       }}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
@@ -645,7 +677,7 @@ function AgentSection({
 
                   {skill.status === 'diverged' ? (
                     <button
-                      onClick={() => setCompareSkill(skill.name)}
+                      onClick={() => setCompareContent({ type: skill.type ?? 'skill', name: skill.name })}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
                     >
                       <GitCompare className="h-3.5 w-3.5" />
@@ -655,10 +687,15 @@ function AgentSection({
                     <button
                       onClick={() => {
                         uploadMutation.mutate(
-                          { filePath: workspace.filePath, target: agent.target, skills: [skill.name] },
+                          {
+                            filePath: workspace.filePath,
+                            target: agent.target,
+                            contents: [{ type: skill.type ?? 'skill', name: skill.name }],
+                            skills: [skill.contentId],
+                          },
                           {
                             onSuccess: (result) => toastForActionResult(result, 'Upload concluido'),
-                            onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir a skill'),
+                            onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir o conteudo'),
                           },
                         );
                       }}
@@ -674,7 +711,7 @@ function AgentSection({
                       <button
                         onClick={() => setTransferDialog({
                           mode: 'copy',
-                          skills: [skill.name],
+                          contents: [{ type: skill.type ?? 'skill', name: skill.name }],
                           sourceWorkspaceFilePath: workspace.filePath,
                           sourceTarget: agent.target,
                         })}
@@ -686,7 +723,7 @@ function AgentSection({
                       <button
                         onClick={() => setTransferDialog({
                           mode: 'move',
-                          skills: [skill.name],
+                          contents: [{ type: skill.type ?? 'skill', name: skill.name }],
                           sourceWorkspaceFilePath: workspace.filePath,
                           sourceTarget: agent.target,
                         })}
@@ -706,7 +743,7 @@ function AgentSection({
 
       {showDownloadDialog && (
         <DownloadToWorkspaceDialog
-          skills={selectedSkills.length > 0 ? selectedSkills.map((skill) => skill.name) : []}
+          contents={selectedSkills.length > 0 ? selectedSkills.map((skill) => ({ type: skill.type ?? 'skill', name: skill.name })) : []}
           workspaces={allWorkspaces}
           initialFilePath={workspace.filePath}
           initialTarget={agent.target}
@@ -723,13 +760,13 @@ function AgentSection({
         />
       )}
 
-      {compareSkill && (
+      {compareContent && (
         <CompareDialog
           filePath={workspace.filePath}
           workspaceName={workspace.workspaceName}
           target={agent.target}
-          skillName={compareSkill}
-          onClose={() => setCompareSkill(null)}
+          contentRef={compareContent}
+          onClose={() => setCompareContent(null)}
         />
       )}
     </section>
@@ -737,14 +774,14 @@ function AgentSection({
 }
 
 function DownloadToWorkspaceDialog({
-  skills,
+  contents,
   workspaces,
   initialFilePath,
   initialTarget,
   lockDestination = false,
   onClose,
 }: {
-  skills: string[];
+  contents: ContentRef[];
   workspaces: SkillsHubWorkspaceSummary[];
   initialFilePath?: string;
   initialTarget?: DeployTarget;
@@ -757,32 +794,37 @@ function DownloadToWorkspaceDialog({
   const selectedWorkspace = workspaces.find((workspace) => workspace.filePath === filePath) ?? null;
 
   const handleConfirm = () => {
-    if (!filePath || !target || skills.length === 0) {
-      toast.error('Selecione um workspace, um agente e pelo menos uma skill.');
+    if (!filePath || !target || contents.length === 0) {
+      toast.error('Selecione um workspace, um agente e pelo menos um conteudo.');
       return;
     }
 
     mutation.mutate(
-      { filePath, target, skills },
+      {
+        filePath,
+        target,
+        contents,
+        skills: contents.map((ref) => `${ref.type}/${ref.name}`),
+      },
       {
         onSuccess: (result) => {
           toastForActionResult(result, 'Download concluido');
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar as skills');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar os conteudos');
         },
       },
     );
   };
 
   return (
-    <ModalShell title="Baixar skills para workspace" onClose={onClose}>
+    <ModalShell title="Baixar conteudos para workspace" onClose={onClose}>
       <p className="text-sm text-gray-500">
         A operacao adiciona o target ao manifesto e faz deploy imediato da versao da nuvem.
       </p>
 
-      <SkillChipRow skills={skills} className="mt-4" />
+      <SkillChipRow contents={contents} className="mt-4" />
 
       {lockDestination ? (
         <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -817,7 +859,7 @@ function DownloadToWorkspaceDialog({
         confirmLabel={mutation.isPending ? 'Baixando...' : 'Baixar agora'}
         onClose={onClose}
         onConfirm={handleConfirm}
-        confirmDisabled={mutation.isPending || !filePath || !target || skills.length === 0}
+        confirmDisabled={mutation.isPending || !filePath || !target || contents.length === 0}
       />
     </ModalShell>
   );
@@ -848,7 +890,8 @@ function TransferDialog({
         sourceTarget: state.sourceTarget,
         destinationWorkspaceFilePath,
         destinationTarget,
-        skills: state.skills,
+        contents: state.contents,
+        skills: state.contents.map((ref) => `${ref.type}/${ref.name}`),
         mode: state.mode,
       },
       {
@@ -857,7 +900,7 @@ function TransferDialog({
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel transferir as skills');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel transferir os conteudos');
         },
       },
     );
@@ -865,7 +908,7 @@ function TransferDialog({
 
   return (
     <ModalShell
-      title={state.mode === 'move' ? 'Mover skills' : 'Copiar skills'}
+      title={state.mode === 'move' ? 'Mover conteudos' : 'Copiar conteudos'}
       onClose={onClose}
     >
       <p className="text-sm text-gray-500">
@@ -874,7 +917,7 @@ function TransferDialog({
           : 'Copiar preserva a origem e adiciona o target no destino.'}
       </p>
 
-      <SkillChipRow skills={state.skills} className="mt-4" />
+      <SkillChipRow contents={state.contents} className="mt-4" />
 
       <div className="mt-4 space-y-4">
         <SelectField
@@ -902,20 +945,242 @@ function TransferDialog({
   );
 }
 
+function RulesSection({
+  workspace,
+  section,
+}: {
+  workspace: SkillsHubWorkspaceSummary;
+  section: SkillsHubWorkspaceRulesSection;
+}) {
+  const [editingRule, setEditingRule] = useState<SkillsHubWorkspaceRule | null>(null);
+  const [creating, setCreating] = useState(false);
+  const deleteRuleMutation = useDeleteWorkspaceRule();
+
+  const handleDelete = (rule: SkillsHubWorkspaceRule) => {
+    if (!rule.writable) {
+      return;
+    }
+    if (!confirm(`Remover a regra local "${rule.name}" deste workspace?`)) {
+      return;
+    }
+
+    deleteRuleMutation.mutate(
+      {
+        filePath: workspace.filePath,
+        appId: rule.appId,
+        name: rule.name,
+        detectedPath: rule.detectedPath,
+      },
+      {
+        onSuccess: () => toast.success(`Regra "${rule.name}" removida`),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel remover a regra'),
+      },
+    );
+  };
+
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-700">
+              {section.label}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+              {section.rules.length} rule{section.rules.length === 1 ? '' : 's'}
+            </span>
+            {section.writable ? (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                edicao local suportada
+              </span>
+            ) : (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                detect-only
+              </span>
+            )}
+          </div>
+          {section.canonicalPaths[0] && (
+            <p className="mt-2 break-all font-mono text-xs text-gray-500">{section.canonicalPaths[0]}</p>
+          )}
+        </div>
+
+        {section.writable && (
+          <button
+            onClick={() => setCreating(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
+          >
+            <FilePlus2 className="h-4 w-4" />
+            Nova rule
+          </button>
+        )}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {section.rules.map((rule) => (
+          <div key={rule.id} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-gray-900">{rule.name}</span>
+                  <span className={cn(
+                    'rounded px-2 py-0.5 text-[11px] font-medium',
+                    rule.source === 'projected'
+                      ? 'bg-sky-100 text-sky-700'
+                      : 'bg-slate-100 text-slate-700',
+                  )}>
+                    {rule.source === 'projected' ? 'projected' : 'local'}
+                  </span>
+                  {rule.projectedFrom && (
+                    <span className="rounded bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                      {rule.projectedFrom.type}/{rule.projectedFrom.name}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 break-all font-mono text-xs text-gray-500">{rule.detectedPath}</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {rule.writable && (
+                  <button
+                    onClick={() => setEditingRule(rule)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-white"
+                  >
+                    <FilePenLine className="h-3.5 w-3.5" />
+                    Editar
+                  </button>
+                )}
+                {rule.writable && (
+                  <button
+                    onClick={() => handleDelete(rule)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remover
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(editingRule || creating) && (
+        <RuleEditorDialog
+          workspaceFilePath={workspace.filePath}
+          appId={section.appId}
+          rule={editingRule}
+          onClose={() => {
+            setEditingRule(null);
+            setCreating(false);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function RuleEditorDialog({
+  workspaceFilePath,
+  appId,
+  rule,
+  onClose,
+}: {
+  workspaceFilePath: string;
+  appId: AgentAppId;
+  rule: SkillsHubWorkspaceRule | null;
+  onClose: () => void;
+}) {
+  const ruleContent = useWorkspaceRuleContent(rule
+    ? {
+        filePath: workspaceFilePath,
+        appId,
+        name: rule.name,
+        detectedPath: rule.detectedPath,
+      }
+    : null);
+  const saveRuleMutation = useSaveWorkspaceRule();
+  const [name, setName] = useState(rule?.name ?? '');
+  const [content, setContent] = useState('');
+
+  useEffect(() => {
+    if (rule && typeof ruleContent.data?.content === 'string') {
+      setContent(ruleContent.data.content);
+    }
+  }, [rule, ruleContent.data?.content]);
+
+  const handleSave = () => {
+    if (!name.trim()) {
+      toast.error('Informe um nome para a rule.');
+      return;
+    }
+
+    saveRuleMutation.mutate(
+      {
+        filePath: workspaceFilePath,
+        appId,
+        name: name.trim(),
+        content,
+        detectedPath: rule?.detectedPath,
+      },
+      {
+        onSuccess: () => {
+          toast.success(rule ? 'Rule atualizada' : 'Rule criada');
+          onClose();
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel salvar a rule');
+        },
+      },
+    );
+  };
+
+  return (
+    <ModalShell title={rule ? `Editar rule ${rule.name}` : 'Nova rule local'} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Nome</label>
+          <input
+            type="text"
+            value={name}
+            disabled={Boolean(rule)}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:bg-gray-50"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Conteudo</label>
+          <textarea
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            rows={16}
+            className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          />
+        </div>
+      </div>
+      <ModalActions
+        confirmLabel={saveRuleMutation.isPending ? 'Salvando...' : 'Salvar rule'}
+        onClose={onClose}
+        onConfirm={handleSave}
+        confirmDisabled={saveRuleMutation.isPending || !name.trim() || !content.trim() || (rule ? ruleContent.isLoading : false)}
+      />
+    </ModalShell>
+  );
+}
+
 function CompareDialog({
   filePath,
   workspaceName,
   target,
-  skillName,
+  contentRef,
   onClose,
 }: {
   filePath: string;
   workspaceName: string;
   target: DeployTarget;
-  skillName: string;
+  contentRef: ContentRef;
   onClose: () => void;
 }) {
-  const diff = useSkillsHubDiff({ filePath, target, name: skillName });
+  const diff = useSkillsHubDiff({ filePath, target, name: contentRef.name, type: contentRef.type });
   const uploadMutation = useSkillsHubUpload();
   const downloadMutation = useSkillsHubDownload();
 
@@ -923,14 +1188,20 @@ function CompareDialog({
 
   const handleUpload = () => {
     uploadMutation.mutate(
-      { filePath, target, skills: [skillName], force: true },
+      {
+        filePath,
+        target,
+        contents: [contentRef],
+        skills: [`${contentRef.type}/${contentRef.name}`],
+        force: true,
+      },
       {
         onSuccess: (mutationResult) => {
           toastForActionResult(mutationResult, 'Upload concluido');
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir a skill');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel subir o conteudo');
         },
       },
     );
@@ -938,21 +1209,26 @@ function CompareDialog({
 
   const handleDownload = () => {
     downloadMutation.mutate(
-      { filePath, target, skills: [skillName] },
+      {
+        filePath,
+        target,
+        contents: [contentRef],
+        skills: [`${contentRef.type}/${contentRef.name}`],
+      },
       {
         onSuccess: (mutationResult) => {
           toastForActionResult(mutationResult, 'Download concluido');
           onClose();
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar a skill');
+          toast.error(err instanceof Error ? err.message : 'Nao foi possivel baixar o conteudo');
         },
       },
     );
   };
 
   return (
-    <ModalShell title={`Comparar ${skillName}`} onClose={onClose} size="6xl">
+    <ModalShell title={`Comparar ${contentRef.type}/${contentRef.name}`} onClose={onClose} size="6xl">
       {diff.isLoading ? (
         <LoadingSpinner className="py-14" size="md" label="Montando comparacao..." />
       ) : diff.error ? (
@@ -1123,20 +1399,20 @@ function TargetSelector({
 }
 
 function SkillChipRow({
-  skills,
+  contents,
   className,
 }: {
-  skills: string[];
+  contents: ContentRef[];
   className?: string;
 }) {
   return (
     <div className={cn('flex flex-wrap gap-1.5', className)}>
-      {skills.map((skill) => (
+      {contents.map((content) => (
         <span
-          key={skill}
+          key={`${content.type}/${content.name}`}
           className="rounded bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
         >
-          {skill}
+          {content.type}/{content.name}
         </span>
       ))}
     </div>
@@ -1228,22 +1504,22 @@ function SelectField({
 }
 
 function toastForActionResult(result: {
-  successful: Array<{ skill: string; warning?: string }>;
-  failed: Array<{ skill: string; error: string }>;
+  successful: Array<{ contentId?: string; skill: string; warning?: string }>;
+  failed: Array<{ contentId?: string; skill: string; error: string }>;
 }, successTitle: string) {
   if (result.failed.length === 0) {
     const warningCount = result.successful.filter((entry) => entry.warning).length;
     if (warningCount > 0) {
-      toast.warning(`${successTitle}: ${result.successful.length} skill(s) processada(s), com ${warningCount} aviso(s).`);
+      toast.warning(`${successTitle}: ${result.successful.length} conteudo(s) processado(s), com ${warningCount} aviso(s).`);
     } else {
-      toast.success(`${successTitle}: ${result.successful.length} skill(s) processada(s).`);
+      toast.success(`${successTitle}: ${result.successful.length} conteudo(s) processado(s).`);
     }
     return;
   }
 
   const errorPreview = result.failed
     .slice(0, 2)
-    .map((entry) => `${entry.skill}: ${entry.error}`)
+    .map((entry) => `${entry.contentId ?? entry.skill}: ${entry.error}`)
     .join(' | ');
   toast.warning(`${successTitle}: ${result.successful.length} sucesso(s), ${result.failed.length} falha(s). ${errorPreview}`);
 }

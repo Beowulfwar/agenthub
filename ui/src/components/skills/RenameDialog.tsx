@@ -2,17 +2,18 @@ import { useState } from 'react';
 import axios from 'axios';
 import { X, PenLine } from 'lucide-react';
 import { toast } from 'sonner';
-import { useRenameSkill } from '../../hooks/useSkills';
+import { useRenameContent } from '../../hooks/useSkills';
+import type { ContentRef } from '../../api/types';
 
 interface RenameDialogProps {
-  skillName: string;
+  contentRef: ContentRef;
   onClose: () => void;
   onSuccess: (newName: string) => void;
 }
 
-export function RenameDialog({ skillName, onClose, onSuccess }: RenameDialogProps) {
-  const [newName, setNewName] = useState(skillName);
-  const renameMutation = useRenameSkill();
+export function RenameDialog({ contentRef, onClose, onSuccess }: RenameDialogProps) {
+  const [newName, setNewName] = useState(contentRef.name);
+  const renameMutation = useRenameContent();
 
   const handleRename = () => {
     const trimmed = newName.trim();
@@ -20,23 +21,23 @@ export function RenameDialog({ skillName, onClose, onSuccess }: RenameDialogProp
       toast.error('Name cannot be empty');
       return;
     }
-    if (trimmed === skillName) {
+    if (trimmed === contentRef.name) {
       toast.error('New name must be different');
       return;
     }
 
     renameMutation.mutate(
-      { name: skillName, newName: trimmed },
+      { ref: contentRef, newName: trimmed },
       {
         onSuccess: (result) => {
-          toast.success(`Renamed "${result.oldName}" to "${result.newName}"`);
+          toast.success(`Renomeado "${result.oldName}" para "${result.newName}"`);
           onSuccess(result.newName);
         },
         onError: (err) => {
           if (axios.isAxiosError(err) && err.response?.status === 409) {
-            toast.error(`Skill "${trimmed}" already exists`);
+            toast.error(`Ja existe um conteudo "${trimmed}"`);
           } else {
-            toast.error(err instanceof Error ? err.message : 'Rename failed');
+            toast.error(err instanceof Error ? err.message : 'Falha ao renomear');
           }
         },
       },
@@ -47,18 +48,18 @@ export function RenameDialog({ skillName, onClose, onSuccess }: RenameDialogProp
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Rename Skill</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Renomear conteudo</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         <p className="mt-3 text-sm text-gray-500">
-          Rename <span className="font-medium text-gray-700">{skillName}</span>
+          Renomear <span className="font-medium text-gray-700">{contentRef.type}/{contentRef.name}</span>
         </p>
 
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700">New name</label>
+          <label className="block text-sm font-medium text-gray-700">Novo nome</label>
           <input
             type="text"
             value={newName}
@@ -74,15 +75,15 @@ export function RenameDialog({ skillName, onClose, onSuccess }: RenameDialogProp
             onClick={onClose}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleRename}
-            disabled={renameMutation.isPending || !newName.trim() || newName.trim() === skillName}
+            disabled={renameMutation.isPending || !newName.trim() || newName.trim() === contentRef.name}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             <PenLine className="h-4 w-4" />
-            {renameMutation.isPending ? 'Renaming...' : 'Rename'}
+            {renameMutation.isPending ? 'Renomeando...' : 'Renomear'}
           </button>
         </div>
       </div>

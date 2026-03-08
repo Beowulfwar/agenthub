@@ -9,7 +9,7 @@
  * The separator `:` is safe because skill names only allow `[a-zA-Z0-9._-]`.
  */
 
-import type { HealthCheckResult, SkillPackage } from '../core/types.js';
+import type { ContentPackage, ContentRef, HealthCheckResult } from '../core/types.js';
 import { SkillNotFoundError } from '../core/errors.js';
 import type { ListOptions, StorageProvider } from './provider.js';
 
@@ -152,29 +152,50 @@ export class AggregateProvider implements StorageProvider {
     return allNames.sort();
   }
 
-  async exists(rawName: string): Promise<boolean> {
-    const { provider, name } = this.resolve(rawName);
+  async listContentRefs(options?: string | ListOptions): Promise<ContentRef[]> {
+    const allRefs: ContentRef[] = [];
+
+    for (const [id, provider] of this.sources) {
+      const refs = await provider.listContentRefs(options);
+      if (this.isMultiSource) {
+        allRefs.push(...refs.map((ref) => ({ ...ref, name: formatQualifiedName(id, ref.name) })));
+      } else {
+        allRefs.push(...refs);
+      }
+    }
+
+    return allRefs.sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  async exists(rawName: string | ContentRef): Promise<boolean> {
+    const raw = typeof rawName === 'string' ? rawName : rawName.name;
+    const { provider, name } = this.resolve(raw);
     return provider.exists(name);
   }
 
-  async get(rawName: string): Promise<SkillPackage> {
-    const { provider, name } = this.resolve(rawName);
-    return provider.get(name);
+  async get(rawName: string | ContentRef): Promise<ContentPackage> {
+    const raw = typeof rawName === 'string' ? rawName : rawName.name;
+    const { provider, name } = this.resolve(raw);
+    return provider.get(typeof rawName === 'string' ? name : { ...rawName, name });
   }
 
-  async put(pkg: SkillPackage): Promise<void> {
+  async put(pkg: ContentPackage): Promise<void> {
     const { provider, name } = this.resolve(pkg.skill.name);
     // Ensure the bare name is used in the package
     const adjusted = { ...pkg, skill: { ...pkg.skill, name } };
     await provider.put(adjusted);
   }
 
-  async delete(rawName: string): Promise<void> {
-    const { provider, name } = this.resolve(rawName);
-    await provider.delete(name);
+  async delete(rawName: string | ContentRef): Promise<void> {
+    const raw = typeof rawName === 'string' ? rawName : rawName.name;
+    const { provider, name } = this.resolve(raw);
+    await provider.delete(typeof rawName === 'string' ? name : { ...rawName, name });
   }
 
-  async *exportAll(): AsyncIterable<SkillPackage> {
+  async *exportAll(): AsyncIterable<ContentPackage> {
     for (const [id, provider] of this.sources) {
       for await (const pkg of provider.exportAll()) {
         if (this.isMultiSource) {

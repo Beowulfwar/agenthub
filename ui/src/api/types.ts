@@ -31,6 +31,13 @@ export type AgentAppId =
   | 'github-copilot'
   | 'antigravity';
 
+export type ContentType = 'skill' | 'prompt' | 'subagent';
+
+export interface ContentRef {
+  type: ContentType;
+  name: string;
+}
+
 export type ArtifactKind =
   | 'skill_package'
   | 'command_file'
@@ -83,9 +90,58 @@ export interface AgentAppCatalogItem {
 
 export interface HealthData {
   configured: boolean;
-  provider: 'git' | 'drive' | null;
+  provider: 'git' | 'drive' | 'local' | 'github' | null;
   providerHealth: { ok: boolean; message?: string } | null;
   cacheCount: number;
+  sourceCount?: number;
+}
+
+export type GitHubRepoVisibility = 'private' | 'public';
+
+export interface GitHubConnectionStatus {
+  connected: boolean;
+  accountLogin?: string;
+  repo?: {
+    owner: string;
+    name: string;
+    branch: string;
+    basePath: string;
+    visibility: GitHubRepoVisibility;
+  };
+  scopes?: string[];
+  reauthorizationRequired?: boolean;
+}
+
+export interface ProvidersOverview {
+  github: GitHubConnectionStatus;
+  local: {
+    sourceId: string | null;
+    directory: string | null;
+  };
+}
+
+export interface GitHubOAuthStartResult {
+  authorizationUrl: string;
+  callbackOrigin: string;
+}
+
+export interface GitHubSyncConflict {
+  path: string;
+  reason: string;
+}
+
+export interface GitHubSyncPreview {
+  localSourceId: string;
+  creates: string[];
+  updates: string[];
+  deletes: string[];
+  skipped: string[];
+  conflicts: GitHubSyncConflict[];
+  manifestPresent: boolean;
+}
+
+export interface GitHubSyncResult extends GitHubSyncPreview {
+  syncedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +150,7 @@ export interface HealthData {
 
 export interface SkillSummary {
   name: string;
+  type?: ContentType;
   title?: string;
   description?: string;
   category?: string;
@@ -106,7 +163,7 @@ export type CloudSkillInstallState = 'installed' | 'not_installed' | 'unknown';
 
 export interface CloudSkillCatalogItem {
   name: string;
-  type: 'skill' | 'prompt' | 'subagent';
+  type: ContentType;
   description: string | null;
   category: string | null;
   tags: string[];
@@ -115,7 +172,7 @@ export interface CloudSkillCatalogItem {
 }
 
 export interface CloudSkillCatalogFilters {
-  types: Array<'skill' | 'prompt' | 'subagent'>;
+  types: ContentType[];
   categories: string[];
   tags: string[];
   installStates: CloudSkillInstallState[];
@@ -137,7 +194,7 @@ export type WorkspaceCatalogSkillStatus =
 
 export interface WorkspaceCatalogSkill {
   name: string;
-  type: 'skill' | 'prompt' | 'subagent' | null;
+  type: ContentType | null;
   description: string | null;
   category: string | null;
   tags: string[];
@@ -202,6 +259,7 @@ export interface SkillMetadata {
 
 export interface Skill {
   name: string;
+  type?: ContentType;
   body: string;
   metadata: SkillMetadata;
 }
@@ -262,6 +320,7 @@ export type DeployTarget = 'claude-code' | 'codex' | 'cursor';
 
 export interface DeployRequest {
   skills: string[];
+  contents?: ContentRef[];
   targets?: DeployTarget[];
   target?: DeployTarget;
   workspaceFilePath?: string;
@@ -288,8 +347,7 @@ export interface DeployResult {
 // Workspace
 // ---------------------------------------------------------------------------
 
-export interface WorkspaceSkillEntry {
-  name: string;
+export interface WorkspaceContentEntry extends ContentRef {
   targets?: DeployTarget[];
   source?: string;
 }
@@ -299,20 +357,31 @@ export interface WorkspaceTargetGroup {
   skills: string[];
 }
 
+export interface WorkspaceContentGroup {
+  targets: DeployTarget[];
+  contents: ContentRef[];
+  skills?: string[];
+}
+
+export type WorkspaceSkillEntry = WorkspaceContentEntry;
+
 export interface WorkspaceManifest {
-  version: 1;
+  version: 1 | 2;
   name?: string;
   description?: string;
   defaultTargets?: DeployTarget[];
-  skills?: WorkspaceSkillEntry[];
-  groups?: WorkspaceTargetGroup[];
+  contents?: WorkspaceContentEntry[];
+  groups?: WorkspaceContentGroup[];
+  skills?: WorkspaceContentEntry[];
   profile?: string;
 }
 
-export interface ResolvedSkill {
+export interface ResolvedContent extends ContentRef {
   name: string;
   targets: DeployTarget[];
 }
+
+export type ResolvedSkill = ResolvedContent;
 
 export interface DeployTargetDirectory {
   target: DeployTarget;
@@ -331,7 +400,7 @@ export interface WorkspaceData {
   manifest: WorkspaceManifest | null;
   filePath: string | null;
   workspaceDir: string | null;
-  resolved: ResolvedSkill[];
+  resolved: ResolvedContent[];
   targetDirectories: DeployTargetDirectory[];
   agents: WorkspaceAgentInventory[];
   apps: WorkspaceAppInventory[];
@@ -396,8 +465,9 @@ export type SkillsHubStatus =
   | 'missing_in_provider';
 
 export interface SkillsHubCloudItem {
+  contentId: string;
   name: string;
-  type: 'skill' | 'prompt' | 'subagent';
+  type: ContentType;
   description: string | null;
   category: string | null;
   tags: string[];
@@ -434,8 +504,9 @@ export interface SkillsHubShell {
 }
 
 export interface SkillsHubWorkspaceSkill {
+  contentId: string;
   name: string;
-  type: 'skill' | 'prompt' | 'subagent' | null;
+  type: ContentType | null;
   description: string | null;
   category: string | null;
   tags: string[];
@@ -448,6 +519,36 @@ export interface SkillsHubWorkspaceSkill {
   warning?: string;
   localPaths: string[];
   availableActions: Array<'download' | 'upload' | 'copy' | 'move' | 'compare'>;
+}
+
+export type SkillsHubWorkspaceRuleSource = 'projected' | 'local';
+
+export interface SkillsHubWorkspaceRule {
+  id: string;
+  name: string;
+  appId: AgentAppId;
+  appLabel: string;
+  source: SkillsHubWorkspaceRuleSource;
+  writable: boolean;
+  detectedPath: string;
+  expectedPath: string;
+  repositoryPath: string;
+  visibilityStatus: ArtifactVisibilityStatus;
+  legacyStatus: ArtifactLegacyStatus;
+  lossiness: ArtifactLossiness;
+  sourceDocs: string[];
+  projectedFrom?: ContentRef | null;
+}
+
+export interface SkillsHubWorkspaceRulesSection {
+  appId: AgentAppId;
+  label: string;
+  supportLevel: SupportLevel;
+  writable: boolean;
+  canonicalPaths: string[];
+  legacyPaths: string[];
+  docUrls: string[];
+  rules: SkillsHubWorkspaceRule[];
 }
 
 export interface SkillsHubWorkspaceAgentDetail {
@@ -468,6 +569,7 @@ export interface SkillsHubWorkspaceDetail {
   isActive: boolean;
   counts: Record<SkillsHubStatus, number> & { total: number };
   agents: SkillsHubWorkspaceAgentDetail[];
+  rules: SkillsHubWorkspaceRulesSection[];
 }
 
 export interface SkillsHubDiffSide {
@@ -480,7 +582,9 @@ export interface SkillsHubDiffSide {
 }
 
 export interface SkillsHubDiffResult {
+  contentId: string;
   name: string;
+  type: ContentType;
   workspaceFilePath: string;
   workspaceName: string;
   target: DeployTarget;
@@ -494,6 +598,9 @@ export interface SkillsHubDiffResult {
 }
 
 export interface SkillsHubActionSuccess {
+  contentId: string;
+  name: string;
+  type: ContentType;
   skill: string;
   target?: DeployTarget;
   path?: string;
@@ -503,6 +610,9 @@ export interface SkillsHubActionSuccess {
 }
 
 export interface SkillsHubActionFailure {
+  contentId: string;
+  name: string;
+  type: ContentType;
   skill: string;
   target?: DeployTarget;
   error: string;
@@ -522,7 +632,7 @@ export type WorkspaceAgentSkillStatus =
 
 export interface WorkspaceAgentSkill {
   name: string;
-  type: 'skill' | 'prompt' | 'subagent' | null;
+  type: ContentType | null;
   description: string | null;
   category: string | null;
   tags: string[];
@@ -546,6 +656,11 @@ export interface WorkspaceAgentInventory {
   appId?: AgentAppId;
   canonicalPaths?: string[];
   legacyPaths?: string[];
+}
+
+export interface LocalWorkspaceRuleContent {
+  path: string;
+  content: string;
 }
 
 export interface WorkspaceAppArtifact {
@@ -686,7 +801,8 @@ export interface AppMigrationPlan {
 // ---------------------------------------------------------------------------
 
 export interface AhubConfig {
-  provider: 'git' | 'drive';
+  version?: 1 | 2;
+  provider?: 'git' | 'drive';
   git?: {
     repoUrl: string;
     branch?: string;
@@ -696,5 +812,33 @@ export interface AhubConfig {
     folderId: string;
     folderName?: string;
   };
+  sources?: Array<{
+    id: string;
+    label?: string;
+    provider: 'git' | 'drive' | 'local' | 'github';
+    enabled?: boolean;
+    git?: {
+      repoUrl: string;
+      branch: string;
+      skillsDir: string;
+    };
+    drive?: {
+      folderId: string;
+      credentialsPath?: string;
+    };
+    local?: {
+      directory: string;
+    };
+    github?: {
+      owner: string;
+      repo: string;
+      branch: string;
+      basePath: string;
+      accountLogin: string;
+      accountId: string;
+      visibility: GitHubRepoVisibility;
+    };
+  }>;
+  defaultSource?: string;
   deployTargets?: Partial<Record<DeployTarget, string>>;
 }

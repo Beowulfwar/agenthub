@@ -4,6 +4,13 @@
 
 import axios from 'axios';
 import type {
+  ContentRef,
+  ContentType,
+  GitHubConnectionStatus,
+  GitHubOAuthStartResult,
+  GitHubRepoVisibility,
+  GitHubSyncPreview,
+  GitHubSyncResult,
   HealthData,
   SkillSummary,
   SkillsCatalog,
@@ -30,9 +37,11 @@ import type {
   WorkspaceSuggestion,
   RegisterWorkspaceResult,
   BrowseResult,
+  LocalWorkspaceRuleContent,
   ScanResult,
   SuggestionDir,
   PickDirectoryResult,
+  ProvidersOverview,
   AhubConfig,
   ApiSuccess,
 } from './types';
@@ -55,6 +64,38 @@ export async function fetchHealth(): Promise<HealthData> {
   return unwrap(await api.get<ApiSuccess<HealthData>>('/health'));
 }
 
+export async function fetchProviders(): Promise<ProvidersOverview> {
+  return unwrap(await api.get<ApiSuccess<ProvidersOverview>>('/providers'));
+}
+
+export async function fetchGitHubStatus(): Promise<GitHubConnectionStatus> {
+  return unwrap(await api.get<ApiSuccess<GitHubConnectionStatus>>('/providers/github/status'));
+}
+
+export async function startGitHubOAuth(body: {
+  repoName?: string;
+  visibility?: GitHubRepoVisibility;
+  uiOrigin: string;
+}): Promise<GitHubOAuthStartResult> {
+  return unwrap(await api.post<ApiSuccess<GitHubOAuthStartResult>>('/providers/github/oauth/start', body));
+}
+
+export async function disconnectGitHub(): Promise<{ disconnected: boolean }> {
+  return unwrap(await api.post<ApiSuccess<{ disconnected: boolean }>>('/providers/github/disconnect'));
+}
+
+export async function bootstrapGitHubRepository(): Promise<{ bootstrapped: boolean }> {
+  return unwrap(await api.post<ApiSuccess<{ bootstrapped: boolean }>>('/providers/github/bootstrap'));
+}
+
+export async function fetchGitHubSyncPreview(): Promise<GitHubSyncPreview> {
+  return unwrap(await api.get<ApiSuccess<GitHubSyncPreview>>('/providers/github/sync/preview'));
+}
+
+export async function runGitHubSync(): Promise<GitHubSyncResult> {
+  return unwrap(await api.post<ApiSuccess<GitHubSyncResult>>('/providers/github/sync'));
+}
+
 // ---------------------------------------------------------------------------
 // Skills
 // ---------------------------------------------------------------------------
@@ -74,7 +115,7 @@ export async function fetchSkillsCatalog(filters?: {
   q?: string;
   workspaceFilePath?: string;
   target?: DeployTarget;
-  type?: 'skill' | 'prompt' | 'subagent';
+  type?: ContentType;
   category?: string;
   tag?: string;
   installState?: CloudSkillInstallState;
@@ -92,7 +133,7 @@ export async function fetchSkillsCatalog(filters?: {
 
 export async function fetchSkillsHub(filters?: {
   q?: string;
-  type?: 'skill' | 'prompt' | 'subagent';
+  type?: ContentType;
   category?: string;
   tag?: string;
 }): Promise<SkillsHubShell> {
@@ -116,6 +157,7 @@ export async function fetchSkillsHubDiff(params: {
   filePath: string;
   target: DeployTarget;
   name: string;
+  type?: ContentType;
 }): Promise<SkillsHubDiffResult> {
   return unwrap(
     await api.get<ApiSuccess<SkillsHubDiffResult>>('/skills/hub/diff', {
@@ -128,6 +170,7 @@ export async function downloadSkillsToWorkspace(body: {
   filePath: string;
   target: DeployTarget;
   skills: string[];
+  contents?: ContentRef[];
 }): Promise<SkillsHubActionResult> {
   return unwrap(
     await api.post<ApiSuccess<SkillsHubActionResult>>('/skills/hub/actions/download', body),
@@ -138,6 +181,7 @@ export async function uploadSkillsToCloud(body: {
   filePath: string;
   target: DeployTarget;
   skills: string[];
+  contents?: ContentRef[];
   force?: boolean;
 }): Promise<SkillsHubActionResult> {
   return unwrap(
@@ -151,6 +195,7 @@ export async function transferSkillsBetweenWorkspaces(body: {
   destinationWorkspaceFilePath: string;
   destinationTarget: DeployTarget;
   skills: string[];
+  contents?: ContentRef[];
   mode: 'copy' | 'move';
 }): Promise<SkillsHubActionResult> {
   return unwrap(
@@ -162,12 +207,24 @@ export async function fetchSkill(name: string): Promise<SkillPackage> {
   return unwrap(await api.get<ApiSuccess<SkillPackage>>(`/skills/${encodeURIComponent(name)}`));
 }
 
-export async function updateSkill(name: string, pkg: SkillPackage): Promise<{ saved: string }> {
-  return unwrap(await api.put<ApiSuccess<{ saved: string }>>(`/skills/${encodeURIComponent(name)}`, pkg));
+export async function fetchContent(ref: ContentRef): Promise<SkillPackage> {
+  return unwrap(await api.get<ApiSuccess<SkillPackage>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}`));
+}
+
+export async function updateSkill(name: string, pkg: SkillPackage): Promise<{ name: string; type: string }> {
+  return unwrap(await api.put<ApiSuccess<{ name: string; type: string }>>(`/skills/${encodeURIComponent(name)}`, pkg));
+}
+
+export async function updateContent(ref: ContentRef, pkg: SkillPackage): Promise<{ name: string; type: string }> {
+  return unwrap(await api.put<ApiSuccess<{ name: string; type: string }>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}`, pkg));
 }
 
 export async function deleteSkill(name: string): Promise<{ deleted: string }> {
   return unwrap(await api.delete<ApiSuccess<{ deleted: string }>>(`/skills/${encodeURIComponent(name)}`));
+}
+
+export async function deleteContent(ref: ContentRef): Promise<{ deleted: string }> {
+  return unwrap(await api.delete<ApiSuccess<{ deleted: string }>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}`));
 }
 
 export async function patchSkill(name: string, patch: PatchSkillRequest): Promise<{ name: string; type: string }> {
@@ -176,16 +233,70 @@ export async function patchSkill(name: string, patch: PatchSkillRequest): Promis
   );
 }
 
+export async function patchContent(ref: ContentRef, patch: PatchSkillRequest): Promise<{ name: string; type: string }> {
+  return unwrap(
+    await api.patch<ApiSuccess<{ name: string; type: string }>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}`, patch),
+  );
+}
+
 export async function cloneSkill(name: string, body: { newName: string }): Promise<CloneResult> {
   return unwrap(await api.post<ApiSuccess<CloneResult>>(`/skills/${encodeURIComponent(name)}/clone`, body));
+}
+
+export async function cloneContent(ref: ContentRef, body: { newName: string }): Promise<CloneResult> {
+  return unwrap(await api.post<ApiSuccess<CloneResult>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}/clone`, body));
 }
 
 export async function renameSkill(name: string, body: { newName: string }): Promise<RenameResult> {
   return unwrap(await api.post<ApiSuccess<RenameResult>>(`/skills/${encodeURIComponent(name)}/rename`, body));
 }
 
+export async function renameContent(ref: ContentRef, body: { newName: string }): Promise<RenameResult> {
+  return unwrap(await api.post<ApiSuccess<RenameResult>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}/rename`, body));
+}
+
 export async function fetchSkillInfo(name: string): Promise<SkillInfo> {
   return unwrap(await api.get<ApiSuccess<SkillInfo>>(`/skills/${encodeURIComponent(name)}/info`));
+}
+
+export async function fetchContentInfo(ref: ContentRef): Promise<SkillInfo> {
+  return unwrap(await api.get<ApiSuccess<SkillInfo>>(`/content/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.name)}/info`));
+}
+
+export async function fetchWorkspaceRuleContent(params: {
+  filePath: string;
+  appId: string;
+  name: string;
+  detectedPath?: string;
+}): Promise<LocalWorkspaceRuleContent> {
+  return unwrap(
+    await api.get<ApiSuccess<LocalWorkspaceRuleContent>>('/skills/hub/rules/content', {
+      params,
+    }),
+  );
+}
+
+export async function saveWorkspaceRuleContent(body: {
+  filePath: string;
+  appId: string;
+  name: string;
+  content: string;
+  detectedPath?: string;
+}): Promise<{ path: string; created: boolean }> {
+  return unwrap(
+    await api.put<ApiSuccess<{ path: string; created: boolean }>>('/skills/hub/rules/local', body),
+  );
+}
+
+export async function deleteWorkspaceRuleContent(body: {
+  filePath: string;
+  appId: string;
+  name: string;
+  detectedPath?: string;
+}): Promise<{ path: string }> {
+  return unwrap(
+    await api.delete<ApiSuccess<{ path: string }>>('/skills/hub/rules/local', { data: body }),
+  );
 }
 
 // ---------------------------------------------------------------------------

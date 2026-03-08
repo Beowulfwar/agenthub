@@ -1,128 +1,110 @@
 # storage-provider
 
-> Spec comportamental — contrato vivo para agentes e desenvolvedores.
+> Spec comportamental — contrato vivo para os backends de storage.
 
 ## Proposito
 
-Contrato uniforme que todos os backends de armazenamento devem implementar (`StorageProvider`) e factory que instancia o provider correto a partir da configuracao global (`createProvider`). Garante que o restante da aplicacao trabalhe contra uma unica abstracao, independente de o backend ser Git ou Google Drive.
+Definir o contrato uniforme que todos os backends de armazenamento devem implementar (`StorageProvider`) e a politica de layout canonico do catalogo cloud. O storage agora e tipado por `type + name`, com leitura dual do layout legado flat e escrita somente no layout novo.
 
 ## Localizacao
 
-- **Codigo**: `src/storage/provider.ts` (interface), `src/storage/factory.ts` (factory), `src/storage/git-provider.ts`, `src/storage/drive-provider.ts`
-- **Testes unitarios**: `tests/storage/factory.test.ts`
-- **Testes de caracterizacao**: `tests/specs/storage-provider.spec.ts`
+- **Codigo**: `src/storage/provider.ts`, `src/storage/factory.ts`, `src/storage/local-provider.ts`, `src/storage/git-provider.ts`, `src/storage/drive-provider.ts`, `src/core/storage-layout-migration.ts`
+- **Testes unitarios**: `tests/storage/factory.test.ts`, `tests/core/storage-layout-migration.test.ts`
 
 ## Invariantes
 
-1. A factory e exaustiva: adicionar um novo valor ao union type `'git' | 'drive'` sem handler no switch causa erro de compilacao TypeScript (variavel `never`)
-2. Se `config.provider` e `'git'` mas `config.git` e `undefined`, a factory lanca `ProviderNotConfiguredError` — nunca erro generico
-3. Se `config.provider` e `'drive'` mas `config.drive` e `undefined`, a factory lanca `ProviderNotConfiguredError`
-4. A interface e uniforme: todos os backends expoe as mesmas assinaturas de metodo (`healthCheck`, `list`, `exists`, `get`, `put`, `delete`, `exportAll`)
-5. `get()` e `delete()` lancam `SkillNotFoundError` quando a skill nao existe — nunca retornam `null` ou silenciam o erro
-6. `list()` retorna nomes ordenados alfabeticamente quando nao ha filtro
-7. `exportAll()` e um `AsyncIterable<SkillPackage>` — permite streaming sem carregar todas as skills em memoria
-8. O campo `name` do provider e readonly e literal (`'git'` ou `'drive'`), nunca uma string arbitraria
+1. A interface continua uniforme para todos os providers.
+2. O identificador canonico do storage e `ContentRef = { type, name }`.
+3. O layout canonico e:
+   - `skills/<name>/`
+   - `prompts/<name>/`
+   - `subagents/<name>/`
+4. O layout legado flat `<root>/<name>/` continua legivel apenas como fallback.
+5. Toda nova escrita (`put`) acontece somente no layout canonico tipado.
+6. `listContentRefs()` e a listagem canonica; `list()` continua como alias stringificado (`type/name`).
+7. `exists`, `get` e `delete` aceitam tanto `ContentRef` quanto alias string, mas chamadas sem `type` so sao seguras quando nao houver ambiguidade.
+8. A rotina de migracao de layout reporta conflitos antes de aplicar e so move entradas com destino livre.
 
-## Comportamentos (Given/When/Then)
+## Comportamentos
 
-### Factory cria GitProvider com configuracao valida
+### Cenario: Listar conteudos tipados
 
-- **Given**: `config.provider === 'git'` e `config.git` contem `{ repoUrl, branch, skillsDir }`
-- **When**: `createProvider(config)`
-- **Then**: Retorna instancia de `GitProvider` com `provider.name === 'git'`
+- **Given**: O root contem `skills/review/`, `prompts/review/` e `subagents/review/`
+- **When**: `provider.listContentRefs()` e chamado
+- **Then**: O retorno inclui tres entradas distintas com o mesmo `name` e `type` diferentes
 
-### Factory cria DriveProvider com configuracao valida
+### Cenario: Ler fallback legado
 
-- **Given**: `config.provider === 'drive'` e `config.drive` contem `{ folderId }`
-- **When**: `createProvider(config)`
-- **Then**: Retorna instancia de `DriveProvider` com `provider.name === 'drive'`
+- **Given**: O root contem apenas um diretorio legado flat `review/SKILL.md`
+- **When**: `provider.get({ type: 'skill', name: 'review' })`
+- **Then**: O provider ainda consegue carregar o pacote a partir do layout antigo
 
-### Factory rejeita provider git sem secao git
+### Cenario: Escrever sempre no layout novo
 
-- **Given**: `config.provider === 'git'` e `config.git === undefined`
-- **When**: `createProvider(config)`
-- **Then**: Lanca `ProviderNotConfiguredError` com `provider === 'git'` e mensagem sugerindo "ahub init"
+- **Given**: Existe um conteudo `prompt/review`
+- **When**: `provider.put(pkg)` e chamado
+- **Then**: O provider grava em `prompts/review/` independentemente de um diretório flat legado existir
 
-### Factory rejeita provider drive sem secao drive
+### Cenario: Dry-run de migracao detecta conflito
 
-- **Given**: `config.provider === 'drive'` e `config.drive === undefined`
-- **When**: `createProvider(config)`
-- **Then**: Lanca `ProviderNotConfiguredError` com `provider === 'drive'` e mensagem sugerindo "ahub init"
+- **Given**: O root contem `review/SKILL.md` e tambem `skills/review/`
+- **When**: `planStorageLayoutMigration(rootDir)` e chamado
+- **Then**: O item `skill/review` aparece com `status = conflict`
 
-### get() lanca SkillNotFoundError para skill inexistente
+### Cenario: Apply move apenas itens prontos
 
-- **Given**: Provider configurado e conectado; skill `"minha-skill-inexistente"` nao existe no backend
-- **When**: `provider.get("minha-skill-inexistente")`
-- **Then**: Lanca `SkillNotFoundError` com `err.skillName === "minha-skill-inexistente"`
-
-### list() filtra por substring case-insensitive
-
-- **Given**: Provider com skills `["fiscal-nfe", "fiscal-nfce", "performance-sql"]`
-- **When**: `provider.list("fiscal")`
-- **Then**: Retorna `["fiscal-nfe", "fiscal-nfce"]` sem incluir `"performance-sql"`
-
-### exportAll() faz streaming de todas as skills
-
-- **Given**: Provider com N skills no backend
-- **When**: `for await (const pkg of provider.exportAll())`
-- **Then**: Emite exatamente N objetos `SkillPackage`, cada um com `skill.name` e `files[]`, sem carregar todos em memoria simultaneamente
+- **Given**: O root contem `alpha/PROMPT.md` sem destino canonico correspondente
+- **When**: `applyStorageLayoutMigration(rootDir)` e chamado
+- **Then**: O diretorio e movido para `prompts/alpha/`
 
 ## Contratos de Interface
-
-### Funcoes Publicas
-
-| Funcao | Input | Output | Throws |
-|--------|-------|--------|--------|
-| `createProvider(config)` | `AhubConfig` | `StorageProvider` | `ProviderNotConfiguredError` |
 
 ### Interface StorageProvider
 
 | Metodo | Input | Output | Throws |
 |--------|-------|--------|--------|
 | `healthCheck()` | — | `Promise<HealthCheckResult>` | — |
-| `list(query?)` | `string?` | `Promise<string[]>` | — |
-| `exists(name)` | `string` | `Promise<boolean>` | — |
-| `get(name)` | `string` | `Promise<SkillPackage>` | `SkillNotFoundError` |
-| `put(pkg)` | `SkillPackage` | `Promise<void>` | — |
-| `delete(name)` | `string` | `Promise<void>` | `SkillNotFoundError` |
-| `exportAll()` | — | `AsyncIterable<SkillPackage>` | — |
+| `list(options?)` | `string \| { query?, type? }` | `Promise<string[]>` | — |
+| `listContentRefs(options?)` | `string \| { query?, type? }` | `Promise<ContentRef[]>` | — |
+| `exists(nameOrRef)` | `string \| ContentRef` | `Promise<boolean>` | — |
+| `get(nameOrRef)` | `string \| ContentRef` | `Promise<ContentPackage>` | `SkillNotFoundError` |
+| `put(pkg)` | `ContentPackage` | `Promise<void>` | — |
+| `delete(nameOrRef)` | `string \| ContentRef` | `Promise<void>` | `SkillNotFoundError` |
+| `exportAll()` | — | `AsyncIterable<ContentPackage>` | — |
 
-### Tipos Exportados
+### Migracao de layout
 
-- `StorageProvider` — interface do contrato de backend
-- `HealthCheckResult` — `{ ok: boolean, message: string }`
-- `SkillPackage` — `{ skill: Skill, files: SkillFile[] }`
+| Funcao | Input | Output |
+|--------|-------|--------|
+| `planStorageLayoutMigration(rootDir)` | `string` | `StorageLayoutMigrationReport` |
+| `applyStorageLayoutMigration(rootDir)` | `string` | `StorageLayoutMigrationReport` |
 
 ## Dependencias
 
-- **Usa**: `simple-git` (GitProvider), `googleapis` (DriveProvider, import lazy), `gray-matter` (via `core/skill.ts`), `core/sanitize.ts`, `core/errors.ts`, `core/types.ts`
-- **Usado por**: `src/cli/commands/*.ts`, `src/mcp/tools.ts`, `src/api/routes/skills.ts`, `src/api/routes/health.ts`, `src/api/routes/deploy.ts`, `src/core/sync.ts`
+- `src/core/skill.ts`
+- `src/core/content-ref.ts`
+- `src/core/storage-layout-migration.ts`
+- `src/core/errors.ts`
+- `src/core/types.ts`
 
 ## Efeitos Colaterais
 
-- `GitProvider.ensureCloned()`: Clona repositorio em `~/.ahub/repos/<nome>/` se nao existir
-- `GitProvider.pullIfStale()`: Executa `git pull` se ultimo pull > 60s atras; falha no pull e warning, nao erro
-- `GitProvider.put()`: Faz `git add`, `git commit`, `git push` no repositorio local
-- `GitProvider.delete()`: Remove diretorio, commita e faz push
-- `DriveProvider.ensureClient()`: Importa `googleapis` lazily, inicia fluxo OAuth2 se nao autenticado
-- `DriveProvider.authenticate()`: Abre servidor HTTP na porta 3000 para callback OAuth2, salva token em `~/.ahub/drive-token.json` (permissao 0o600)
-- `DriveProvider.put()`: Cria/atualiza arquivos no Google Drive
-- `DriveProvider.delete()`: Move pasta para lixeira do Drive (soft-delete, nao permanente)
+- Providers Git e Drive continuam materializando alteracoes no backend remoto.
+- O provider local grava no filesystem tipado.
+- `applyStorageLayoutMigration` renomeia diretorios no disco.
 
 ## Decisoes de Design
 
 | Decisao | Justificativa |
 |---------|---------------|
-| Provider pattern com factory | `createProvider()` isola a escolha do backend; restante da app nunca importa `GitProvider`/`DriveProvider` diretamente |
-| Exhaustive switch com `never` | O `default` case atribui a variavel do tipo `never`, garantindo erro de compilacao ao adicionar provider sem handler |
-| GitProvider faz pull com throttle (60s) | Evita pulls excessivos em operacoes em lote; falha no pull e warning, nao erro — dados stale sao melhores que crash |
-| DriveProvider usa soft-delete | `delete()` move para lixeira em vez de deletar permanentemente, permitindo recuperacao manual |
-| DriveProvider importa googleapis lazily | Usuarios que so usam Git nunca pagam o custo de carregar o SDK do Google Drive |
-| OAuth2 com servidor HTTP local | DriveProvider abre servidor temporario na porta 3000 para callback, com timeout de 5 min; token persistido com permissao 0o600 |
-| Interface uniforme | Ambos os providers expoe mesmos metodos; trocar backend nao requer alteracao no codigo consumidor |
+| Layout `/<type>/<name>/` | Permite coexistencia segura de slugs iguais entre tipos diferentes |
+| Leitura dual, escrita unica | Facilita migracao sem manter ambiguidade para sempre |
+| `listContentRefs()` como API canonica | Elimina parsing heuristico no restante da aplicacao |
+| CLI `migrate-layout` | Torna a migracao operacional e auditavel fora do codigo de runtime |
 
 ## Changelog
 
 | Data | Mudanca |
 |------|---------|
 | 2025-03-05 | Spec criada |
+| 2026-03-07 | Atualizada para storage tipado `type + name`, fallback do layout legado e migracao `dry-run/apply` |

@@ -9,6 +9,8 @@ import {
   SkillValidationError,
   ProviderNotConfiguredError,
   AuthenticationError,
+  SecretStoreError,
+  ConflictError,
   WorkspaceNotFoundError,
   WorkspaceSkillReferenceError,
 } from '../core/errors.js';
@@ -39,6 +41,12 @@ export const errorHandler: ErrorHandler = (err, c) => {
   }
   if (err instanceof AuthenticationError) {
     return c.json({ error: { code: 'AUTH_ERROR', message: err.message } }, 401);
+  }
+  if (err instanceof ConflictError) {
+    return c.json({ error: { code: 'CONFLICT', message: err.message } }, 409);
+  }
+  if (err instanceof SecretStoreError) {
+    return c.json({ error: { code: 'SECRET_STORE_ERROR', message: err.message } }, 500);
   }
   if (err instanceof AhubError) {
     return c.json({ error: { code: 'AHUB_ERROR', message: err.message } }, 500);

@@ -2,17 +2,18 @@ import { useState } from 'react';
 import axios from 'axios';
 import { X, Copy } from 'lucide-react';
 import { toast } from 'sonner';
-import { useCloneSkill } from '../../hooks/useSkills';
+import { useCloneContent } from '../../hooks/useSkills';
+import type { ContentRef } from '../../api/types';
 
 interface CloneDialogProps {
-  skillName: string;
+  contentRef: ContentRef;
   onClose: () => void;
   onSuccess: (newName: string) => void;
 }
 
-export function CloneDialog({ skillName, onClose, onSuccess }: CloneDialogProps) {
-  const [newName, setNewName] = useState(`${skillName}-copy`);
-  const cloneMutation = useCloneSkill();
+export function CloneDialog({ contentRef, onClose, onSuccess }: CloneDialogProps) {
+  const [newName, setNewName] = useState(`${contentRef.name}-copy`);
+  const cloneMutation = useCloneContent();
 
   const handleClone = () => {
     const trimmed = newName.trim();
@@ -22,17 +23,17 @@ export function CloneDialog({ skillName, onClose, onSuccess }: CloneDialogProps)
     }
 
     cloneMutation.mutate(
-      { name: skillName, newName: trimmed },
+      { ref: contentRef, newName: trimmed },
       {
         onSuccess: (result) => {
-          toast.success(`Cloned "${skillName}" as "${result.name}"`);
+          toast.success(`Clonado "${contentRef.name}" como "${result.name}"`);
           onSuccess(result.name);
         },
         onError: (err) => {
           if (axios.isAxiosError(err) && err.response?.status === 409) {
-            toast.error(`Skill "${trimmed}" already exists`);
+            toast.error(`Ja existe um conteudo "${trimmed}"`);
           } else {
-            toast.error(err instanceof Error ? err.message : 'Clone failed');
+            toast.error(err instanceof Error ? err.message : 'Falha ao clonar');
           }
         },
       },
@@ -43,18 +44,18 @@ export function CloneDialog({ skillName, onClose, onSuccess }: CloneDialogProps)
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Clone Skill</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Clonar conteudo</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         <p className="mt-3 text-sm text-gray-500">
-          Create a copy of <span className="font-medium text-gray-700">{skillName}</span>
+          Criar uma copia de <span className="font-medium text-gray-700">{contentRef.type}/{contentRef.name}</span>
         </p>
 
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700">New name</label>
+          <label className="block text-sm font-medium text-gray-700">Novo nome</label>
           <input
             type="text"
             value={newName}
@@ -70,7 +71,7 @@ export function CloneDialog({ skillName, onClose, onSuccess }: CloneDialogProps)
             onClick={onClose}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleClone}
@@ -78,7 +79,7 @@ export function CloneDialog({ skillName, onClose, onSuccess }: CloneDialogProps)
             className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             <Copy className="h-4 w-4" />
-            {cloneMutation.isPending ? 'Cloning...' : 'Clone'}
+            {cloneMutation.isPending ? 'Clonando...' : 'Clonar'}
           </button>
         </div>
       </div>

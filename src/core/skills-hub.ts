@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import { formatContentRef, parseContentRef } from './content-ref.js';
 import { detectLocalSkills } from './explorer.js';
-import { readDetectedArtifactContent } from './app-artifacts.js';
+import { buildWorkspaceAppInventories, readDetectedArtifactContent } from './app-artifacts.js';
 import { getMarkerFile, loadSkillPackage, serializeSkill } from './skill.js';
-import { addTargetToManifest, loadWorkspaceManifest, removeTargetFromManifest, saveWorkspaceManifest, setSkillTargetsInManifest, resolveManifestSkills } from './workspace.js';
+import { addContentTargetToManifest, loadWorkspaceManifest, removeContentTargetFromManifest, saveWorkspaceManifest, setSkillTargetsInManifest, resolveManifestSkills } from './workspace.js';
 import { inspectDeployTargets, resolveDeployTargetRoot } from './config.js';
 import { buildCloudSkillsCatalog, loadProviderSkillIndex } from './workspace-catalog.js';
 import { createDeployer } from '../deploy/deployer.js';
@@ -12,6 +13,7 @@ import type { StorageProvider } from '../storage/provider.js';
 import type {
   AhubConfig,
   ArtifactLossiness,
+  ContentRef,
   ContentType,
   DeployTarget,
   DetectedLocalSkill,
@@ -27,13 +29,15 @@ import type {
   SkillsHubStatus,
   SkillsHubWorkspaceAgentDetail,
   SkillsHubWorkspaceDetail,
+  SkillsHubWorkspaceRule,
+  SkillsHubWorkspaceRulesSection,
   SkillsHubWorkspaceSkill,
   SkillsHubWorkspaceSummary,
   WorkspaceManifest,
 } from './types.js';
 
 interface ProviderPackageLoader {
-  get(name: string): Promise<SkillPackage | null>;
+  get(ref: ContentRef): Promise<SkillPackage | null>;
 }
 
 interface ProviderIndexEntry {
@@ -100,7 +104,8 @@ export async function buildSkillsHubShell(params: {
           continue;
         }
 
-        const usage = usageBySkill.get(skill.name) ?? {
+        const usageKey = formatContentRef({ type: skill.type ?? 'skill', name: skill.name });
+        const usage = usageBySkill.get(usageKey) ?? {
           workspaces: new Set<string>(),
           diverged: new Set<string>(),
         };
@@ -108,14 +113,15 @@ export async function buildSkillsHubShell(params: {
         if (skill.status === 'diverged') {
           usage.diverged.add(detail.filePath);
         }
-        usageBySkill.set(skill.name, usage);
+        usageBySkill.set(usageKey, usage);
       }
     }
   }
 
   const cloudItems: SkillsHubCloudItem[] = cloudCatalog.items.map((item) => {
-    const usage = usageBySkill.get(item.name);
+    const usage = usageBySkill.get(formatContentRef({ type: item.type, name: item.name }));
     return {
+      contentId: formatContentRef({ type: item.type, name: item.name }),
       name: item.name,
       type: item.type,
       description: item.description,
@@ -151,32 +157,39 @@ export async function buildSkillsHubWorkspaceDetail(params: {
   const providerIndex = params.providerIndex ?? await loadProviderSkillIndexFromLoader(params.packageLoader);
   const localSkills = dedupeDetectedLocalSkills(await detectLocalSkills(workspaceDir));
   const resolved = manifest ? resolveManifestSkills(manifest) : [];
+  const rules = await buildWorkspaceRulesSections({
+    workspaceDir,
+    providerIndex,
+    resolved,
+  });
 
   const agents = await Promise.all(
     targetDirectories.map(async (targetDirectory): Promise<SkillsHubWorkspaceAgentDetail> => {
-      const configuredNames = new Set(
-        resolved.filter((skill) => skill.targets.includes(targetDirectory.target)).map((skill) => skill.name),
+      const configuredRefs = resolved.filter((skill) => skill.targets.includes(targetDirectory.target));
+      const configuredKeys = new Set(
+        configuredRefs.map((skill) => formatContentRef({ type: skill.type, name: skill.name })),
       );
       const detected = localSkills.filter((entry) => entry.target === targetDirectory.target);
-      const detectedByName = groupDetectedLocalSkills(detected);
-      const skillNames = new Set<string>([
-        ...configuredNames,
-        ...detectedByName.keys(),
+      const detectedByKey = groupDetectedLocalSkills(detected);
+      const skillKeys = new Set<string>([
+        ...configuredKeys,
+        ...detectedByKey.keys(),
       ]);
 
       const skills: SkillsHubWorkspaceSkill[] = [];
 
-      for (const name of [...skillNames].sort((a, b) => a.localeCompare(b))) {
-        const localEntry = detectedByName.get(name)?.[0] ?? null;
+      for (const key of [...skillKeys].sort((a, b) => a.localeCompare(b))) {
+        const ref = parseContentRef(key, 'skill');
+        const localEntry = detectedByKey.get(key)?.[0] ?? null;
         const localSnapshot = localEntry
           ? await buildLocalSkillSnapshot(localEntry, targetDirectory.target)
           : null;
-        const providerPkg = await params.packageLoader.get(name);
+        const providerPkg = await getPackageFromLoader(params.packageLoader, ref);
         const cloudSnapshot = providerPkg
           ? buildCloudSkillSnapshot(providerPkg, targetDirectory.target)
           : null;
-        const providerMeta = providerIndex.get(name) ?? null;
-        const inManifest = configuredNames.has(name);
+        const providerMeta = providerIndex.get(key) ?? providerIndex.get(ref.name) ?? null;
+        const inManifest = configuredKeys.has(key);
         const installedLocally = Boolean(localSnapshot);
         const existsInProvider = Boolean(cloudSnapshot);
         const hashesMatch = localSnapshot !== null
@@ -189,10 +202,11 @@ export async function buildSkillsHubWorkspaceDetail(params: {
           hashesMatch,
         });
         const pkg = providerPkg ?? localSnapshot?.pkg ?? null;
-        const type = providerMeta?.type ?? pkg?.skill.type ?? 'skill';
+        const type = providerMeta?.type ?? pkg?.skill.type ?? ref.type;
 
         skills.push({
-          name,
+          contentId: formatContentRef({ type, name: ref.name }),
+          name: ref.name,
           type,
           description: providerMeta?.description ?? pkg?.skill.description ?? null,
           category: providerMeta?.category ?? null,
@@ -236,6 +250,7 @@ export async function buildSkillsHubWorkspaceDetail(params: {
     isActive: params.isActive,
     counts,
     agents,
+    rules,
   };
 }
 
@@ -244,22 +259,34 @@ export async function buildSkillsHubDiff(params: {
   filePath: string;
   target: DeployTarget;
   name: string;
+  type?: ContentType;
 }): Promise<SkillsHubDiffResult> {
   const manifest = await loadWorkspaceManifest(params.filePath).catch(() => null);
   const workspaceDir = path.dirname(params.filePath);
   const workspaceName = manifest?.name?.trim() || lastPathSegment(workspaceDir);
   const localEntry = (await detectLocalSkills(workspaceDir))
-    .filter((entry) => entry.target === params.target && entry.name === params.name)
+    .filter((entry) =>
+      entry.target === params.target
+      && entry.name === params.name
+      && (!params.type || resolveLocalArtifactType(entry) === params.type),
+    )
     .sort((a, b) => a.absolutePath.localeCompare(b.absolutePath))[0] ?? null;
   const localSnapshot = localEntry
     ? await buildLocalSkillSnapshot(localEntry, params.target)
     : null;
-  const providerPkg = await params.provider.get(params.name).catch(() => null);
+  const providerPkg = await getPackageFromProvider(params.provider, {
+    type: params.type ?? 'skill',
+    name: params.name,
+  });
   const cloudSnapshot = providerPkg
     ? buildCloudSkillSnapshot(providerPkg, params.target)
     : null;
   const inManifest = manifest
-    ? resolveManifestSkills(manifest).some((entry) => entry.name === params.name && entry.targets.includes(params.target))
+    ? resolveManifestSkills(manifest).some((entry) =>
+      entry.name === params.name
+      && (!params.type || entry.type === params.type)
+      && entry.targets.includes(params.target),
+    )
     : false;
   const hashesMatch = localSnapshot !== null
     && cloudSnapshot !== null
@@ -272,7 +299,9 @@ export async function buildSkillsHubDiff(params: {
   });
 
   return {
+    contentId: formatContentRef({ type: params.type ?? 'skill', name: params.name }),
     name: params.name,
+    type: params.type ?? providerPkg?.skill.type ?? localSnapshot?.pkg.skill.type ?? 'skill',
     workspaceFilePath: params.filePath,
     workspaceName,
     target: params.target,
@@ -291,7 +320,8 @@ export async function performSkillsHubDownload(params: {
   provider: StorageProvider;
   filePath: string;
   target: DeployTarget;
-  skills: string[];
+  contents?: ContentRef[];
+  skills?: string[];
 }): Promise<SkillsHubActionResult> {
   const manifest = await loadWorkspaceManifest(params.filePath);
   const workspaceDir = path.dirname(params.filePath);
@@ -303,13 +333,16 @@ export async function performSkillsHubDownload(params: {
   const successful: SkillsHubActionSuccess[] = [];
   const failed: SkillsHubActionFailure[] = [];
 
-  for (const name of uniqueNames(params.skills)) {
-    const pkg = await params.provider.get(name).catch(() => null);
+  for (const ref of uniqueContents(params.contents ?? legacySkillsToContents(params.skills))) {
+    const pkg = await getPackageFromProvider(params.provider, ref);
     if (!pkg) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
-        error: `Skill "${name}" nao encontrada na nuvem.`,
+        error: `Content "${formatContentRef(ref)}" nao encontrado na nuvem.`,
         code: 'SKILL_NOT_FOUND',
       });
       continue;
@@ -317,17 +350,23 @@ export async function performSkillsHubDownload(params: {
 
     try {
       const deployedPath = await deployer.deploy(pkg);
-      nextManifest = addTargetToManifest(nextManifest, name, params.target);
+      nextManifest = addContentTargetToManifest(nextManifest, ref, params.target);
       manifestChanged = true;
       successful.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
         path: deployedPath,
         message: 'Baixada da nuvem e instalada no workspace.',
       });
     } catch (err) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
         error: err instanceof Error ? err.message : String(err),
         code: 'DEPLOY_FAILED',
@@ -346,37 +385,46 @@ export async function performSkillsHubUpload(params: {
   provider: StorageProvider;
   filePath: string;
   target: DeployTarget;
-  skills: string[];
+  contents?: ContentRef[];
+  skills?: string[];
   force?: boolean;
 }): Promise<SkillsHubActionResult> {
   const workspaceDir = path.dirname(params.filePath);
   const localEntries = dedupeDetectedLocalSkills(await detectLocalSkills(workspaceDir))
     .filter((entry) => entry.target === params.target);
-  const byName = new Map(localEntries.map((entry) => [entry.name, entry] as const));
+  const byName = new Map(
+    localEntries.map((entry) => [formatContentRef({ type: resolveLocalArtifactType(entry), name: entry.name }), entry] as const),
+  );
   const successful: SkillsHubActionSuccess[] = [];
   const failed: SkillsHubActionFailure[] = [];
 
-  for (const name of uniqueNames(params.skills)) {
-    const localEntry = byName.get(name);
+  for (const ref of uniqueContents(params.contents ?? legacySkillsToContents(params.skills))) {
+    const localEntry = byName.get(formatContentRef(ref));
     if (!localEntry) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
-        error: `Skill "${name}" nao foi encontrada localmente neste agente.`,
+        error: `Content "${formatContentRef(ref)}" nao foi encontrado localmente neste agente.`,
         code: 'LOCAL_SKILL_NOT_FOUND',
       });
       continue;
     }
 
     const localSnapshot = await buildLocalSkillSnapshot(localEntry, params.target);
-    const cloudPkg = await params.provider.get(name).catch(() => null);
+    const cloudPkg = await getPackageFromProvider(params.provider, ref);
     if (cloudPkg && !params.force) {
       const cloudSnapshot = buildCloudSkillSnapshot(cloudPkg, params.target);
       if (localSnapshot.compareHash !== cloudSnapshot.compareHash) {
         failed.push({
-          skill: name,
+          contentId: formatContentRef(ref),
+          name: ref.name,
+          type: ref.type,
+          skill: ref.name,
           target: params.target,
-          error: `Skill "${name}" diverge da nuvem. Abra a comparacao antes de subir.`,
+          error: `Content "${formatContentRef(ref)}" diverge da nuvem. Abra a comparacao antes de subir.`,
           code: 'DIFF_CONFIRMATION_REQUIRED',
         });
         continue;
@@ -386,7 +434,10 @@ export async function performSkillsHubUpload(params: {
     try {
       await params.provider.put(localSnapshot.pkg);
       successful.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
         message: 'Versao local enviada para a nuvem.',
         ...(localSnapshot.warning ? { warning: localSnapshot.warning } : {}),
@@ -394,7 +445,10 @@ export async function performSkillsHubUpload(params: {
       });
     } catch (err) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.target,
         error: err instanceof Error ? err.message : String(err),
         code: 'UPLOAD_FAILED',
@@ -411,7 +465,8 @@ export async function performSkillsHubTransfer(params: {
   sourceTarget: DeployTarget;
   destinationWorkspaceFilePath: string;
   destinationTarget: DeployTarget;
-  skills: string[];
+  contents?: ContentRef[];
+  skills?: string[];
   mode: 'copy' | 'move';
 }): Promise<SkillsHubActionResult> {
   const sourceWorkspaceDir = path.dirname(params.sourceWorkspaceFilePath);
@@ -420,7 +475,9 @@ export async function performSkillsHubTransfer(params: {
   const destinationManifest = await loadWorkspaceManifest(params.destinationWorkspaceFilePath);
   const localEntries = dedupeDetectedLocalSkills(await detectLocalSkills(sourceWorkspaceDir))
     .filter((entry) => entry.target === params.sourceTarget);
-  const byName = new Map(localEntries.map((entry) => [entry.name, entry] as const));
+  const byName = new Map(
+    localEntries.map((entry) => [formatContentRef({ type: resolveLocalArtifactType(entry), name: entry.name }), entry] as const),
+  );
 
   let nextSourceManifest = sourceManifest;
   let nextDestinationManifest = destinationManifest;
@@ -439,13 +496,16 @@ export async function performSkillsHubTransfer(params: {
   const successful: SkillsHubActionSuccess[] = [];
   const failed: SkillsHubActionFailure[] = [];
 
-  for (const name of uniqueNames(params.skills)) {
-    const localEntry = byName.get(name);
+  for (const ref of uniqueContents(params.contents ?? legacySkillsToContents(params.skills))) {
+    const localEntry = byName.get(formatContentRef(ref));
     if (!localEntry) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.sourceTarget,
-        error: `Skill "${name}" nao foi encontrada localmente no agente de origem.`,
+        error: `Content "${formatContentRef(ref)}" nao foi encontrado localmente no agente de origem.`,
         code: 'LOCAL_SKILL_NOT_FOUND',
       });
       continue;
@@ -454,21 +514,24 @@ export async function performSkillsHubTransfer(params: {
     try {
       const localSnapshot = await buildLocalSkillSnapshot(localEntry, params.sourceTarget);
       const deployedPath = await destinationDeployer.deploy(localSnapshot.pkg);
-      nextDestinationManifest = addTargetToManifest(
+      nextDestinationManifest = addContentTargetToManifest(
         nextDestinationManifest,
-        name,
+        ref,
         params.destinationTarget,
       );
       destinationChanged = true;
 
       if (params.mode === 'move') {
         try {
-          await sourceDeployer.undeploy(name);
-          nextSourceManifest = removeTargetFromManifest(nextSourceManifest, name, params.sourceTarget);
+          await sourceDeployer.undeploy(ref.name);
+          nextSourceManifest = removeContentTargetFromManifest(nextSourceManifest, ref, params.sourceTarget);
           sourceChanged = true;
         } catch (err) {
           successful.push({
-            skill: name,
+            contentId: formatContentRef(ref),
+            name: ref.name,
+            type: ref.type,
+            skill: ref.name,
             target: params.destinationTarget,
             path: deployedPath,
             message: 'Copiada para o destino, mas a remocao da origem falhou; a operacao virou copia.',
@@ -480,7 +543,10 @@ export async function performSkillsHubTransfer(params: {
       }
 
       successful.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.destinationTarget,
         path: deployedPath,
         message:
@@ -492,7 +558,10 @@ export async function performSkillsHubTransfer(params: {
       });
     } catch (err) {
       failed.push({
-        skill: name,
+        contentId: formatContentRef(ref),
+        name: ref.name,
+        type: ref.type,
+        skill: ref.name,
         target: params.destinationTarget,
         error: err instanceof Error ? err.message : String(err),
         code: 'TRANSFER_FAILED',
@@ -514,13 +583,38 @@ function createProviderPackageLoader(provider: StorageProvider): ProviderPackage
   const cache = new Map<string, Promise<SkillPackage | null>>();
 
   return {
-    async get(name: string): Promise<SkillPackage | null> {
-      if (!cache.has(name)) {
-        cache.set(name, provider.get(name).catch(() => null));
+    async get(ref: ContentRef): Promise<SkillPackage | null> {
+      const key = formatContentRef(ref);
+      if (!cache.has(key)) {
+        cache.set(key, provider.get(ref).catch(() => null));
       }
-      return cache.get(name)!;
+      return cache.get(key)!;
     },
   };
+}
+
+async function getPackageFromLoader(
+  loader: ProviderPackageLoader,
+  ref: ContentRef,
+): Promise<SkillPackage | null> {
+  const pkg = await loader.get(ref).catch(() => null);
+  if (pkg || ref.type !== 'skill') {
+    return pkg;
+  }
+
+  return loader.get(ref.name as unknown as ContentRef).catch(() => null);
+}
+
+async function getPackageFromProvider(
+  provider: StorageProvider,
+  ref: ContentRef,
+): Promise<SkillPackage | null> {
+  const pkg = await provider.get(ref).catch(() => null);
+  if (pkg || ref.type !== 'skill') {
+    return pkg;
+  }
+
+  return provider.get(ref.name).catch(() => null);
 }
 
 async function loadProviderSkillIndexFromLoader(
@@ -657,6 +751,69 @@ function buildCloudDiffSide(snapshot: CloudSkillSnapshot | null, pkg: SkillPacka
   };
 }
 
+async function buildWorkspaceRulesSections(params: {
+  workspaceDir: string;
+  providerIndex: Map<string, ProviderIndexEntry>;
+  resolved: Array<{ type: ContentType; name: string; targets: DeployTarget[] }>;
+}): Promise<SkillsHubWorkspaceRulesSection[]> {
+  const appInventories = await buildWorkspaceAppInventories(params.workspaceDir);
+  const cursorManifestRules = new Set<string>(
+    params.resolved
+      .filter((entry) => entry.type === 'skill' && entry.targets.includes('cursor'))
+      .map((entry) => formatContentRef({ type: entry.type, name: entry.name })),
+  );
+
+  return appInventories
+    .map((app): SkillsHubWorkspaceRulesSection | null => {
+      const rules = app.artifacts
+        .filter((artifact) => artifact.artifactKind === 'rule_file')
+        .map((artifact): SkillsHubWorkspaceRule => {
+          const projectedFrom = { type: 'skill' as const, name: artifact.name };
+          const projected = app.appId === 'cursor'
+            && (
+              cursorManifestRules.has(formatContentRef(projectedFrom))
+              || params.providerIndex.has(formatContentRef(projectedFrom))
+              || params.providerIndex.has(artifact.name)
+            );
+
+          return {
+            id: artifact.id,
+            name: artifact.name,
+            appId: app.appId,
+            appLabel: app.label,
+            source: projected ? 'projected' : 'local',
+            writable: app.appId === 'cursor',
+            detectedPath: artifact.detectedPath,
+            expectedPath: artifact.expectedPath,
+            repositoryPath: artifact.repositoryPath,
+            visibilityStatus: artifact.visibilityStatus,
+            legacyStatus: artifact.legacyStatus,
+            lossiness: artifact.lossiness,
+            sourceDocs: artifact.sourceDocs,
+            projectedFrom: projected ? projectedFrom : null,
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name) || a.detectedPath.localeCompare(b.detectedPath));
+
+      if (rules.length === 0) {
+        return null;
+      }
+
+      return {
+        appId: app.appId,
+        label: app.label,
+        supportLevel: app.supportLevel,
+        writable: app.appId === 'cursor',
+        canonicalPaths: app.canonicalPaths,
+        legacyPaths: app.legacyPaths,
+        docUrls: app.docUrls,
+        rules,
+      };
+    })
+    .filter((section): section is SkillsHubWorkspaceRulesSection => section !== null)
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function toWorkspaceSummary(detail: SkillsHubWorkspaceDetail): SkillsHubWorkspaceSummary {
   return {
     filePath: detail.filePath,
@@ -736,7 +893,7 @@ function dedupeDetectedLocalSkills(entries: DetectedLocalSkill[]): DetectedLocal
   const map = new Map<string, DetectedLocalSkill>();
 
   for (const entry of entries) {
-    const key = `${entry.name}::${entry.tool}::${entry.absolutePath}`;
+    const key = `${resolveLocalArtifactType(entry)}::${entry.name}::${entry.tool}::${entry.absolutePath}`;
     if (!map.has(key)) {
       map.set(key, entry);
     }
@@ -749,16 +906,27 @@ function groupDetectedLocalSkills(entries: DetectedLocalSkill[]): Map<string, De
   const grouped = new Map<string, DetectedLocalSkill[]>();
 
   for (const entry of entries) {
-    const current = grouped.get(entry.name) ?? [];
+    const key = formatContentRef({ type: resolveLocalArtifactType(entry), name: entry.name });
+    const current = grouped.get(key) ?? [];
     current.push(entry);
-    grouped.set(entry.name, current);
+    grouped.set(key, current);
   }
 
   return grouped;
 }
 
-function uniqueNames(names: string[]): string[] {
-  return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+function uniqueContents(contents: ContentRef[]): ContentRef[] {
+  const unique = new Map<string, ContentRef>();
+  for (const content of contents) {
+    unique.set(formatContentRef(content), content);
+  }
+  return [...unique.values()].sort((a, b) =>
+    formatContentRef(a).localeCompare(formatContentRef(b)),
+  );
+}
+
+function legacySkillsToContents(skills?: string[]): ContentRef[] {
+  return (skills ?? []).map((name) => parseContentRef(name, 'skill'));
 }
 
 function lastPathSegment(fullPath: string): string {

@@ -25,6 +25,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/skills/:type/:name" element={<SkillDetailPage />} />
             <Route path="/skills/:name" element={<SkillDetailPage />} />
             <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/config" element={<ConfigPage />} />

@@ -3,9 +3,10 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const { mockDetectLocalSkills, mockReadDetectedArtifactContent } = vi.hoisted(() => ({
+const { mockDetectLocalSkills, mockReadDetectedArtifactContent, mockBuildWorkspaceAppInventories } = vi.hoisted(() => ({
   mockDetectLocalSkills: vi.fn(),
   mockReadDetectedArtifactContent: vi.fn(),
+  mockBuildWorkspaceAppInventories: vi.fn(),
 }));
 
 vi.mock('../../src/core/explorer.js', () => ({
@@ -13,6 +14,7 @@ vi.mock('../../src/core/explorer.js', () => ({
 }));
 
 vi.mock('../../src/core/app-artifacts.js', async () => ({
+  buildWorkspaceAppInventories: mockBuildWorkspaceAppInventories,
   readDetectedArtifactContent: mockReadDetectedArtifactContent,
 }));
 
@@ -128,6 +130,8 @@ describe('skills-hub', () => {
   beforeEach(async () => {
     mockDetectLocalSkills.mockReset();
     mockReadDetectedArtifactContent.mockReset();
+    mockBuildWorkspaceAppInventories.mockReset();
+    mockBuildWorkspaceAppInventories.mockResolvedValue([]);
     await rm(TEST_ROOT, { recursive: true, force: true });
     await mkdir(TEST_ROOT, { recursive: true });
   });
@@ -329,7 +333,7 @@ describe('skills-hub', () => {
     const destinationManifest = await loadWorkspaceManifest(destinationFilePath);
     expect(resolveManifestSkills(sourceManifest)).toEqual([]);
     expect(resolveManifestSkills(destinationManifest)).toEqual([
-      { name: 'alpha', targets: ['claude-code'] },
+      { type: 'skill', name: 'alpha', targets: ['claude-code'] },
     ]);
 
     const destinationContent = await readFile(

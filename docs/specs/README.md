@@ -15,15 +15,15 @@ Documentacao comportamental spec-driven. Cada spec e' um contrato vivo que docum
 |------|--------|--------|--------------------------|
 | [core-skill](core-skill.md) | Skill parse/serialize/validate | `src/core/skill.ts` | `tests/specs/core-skill.spec.ts` |
 | [core-config](core-config.md) | Config CRUD | `src/core/config.ts` | `tests/specs/core-config.spec.ts` |
-| [core-workspace](core-workspace.md) | Workspace manifest | `src/core/workspace.ts` | `tests/specs/core-workspace.spec.ts` |
-| [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto com diagnostico local por agente | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
+| [core-workspace](core-workspace.md) | Manifesto de workspace `version: 2` com `contents[]` | `src/core/workspace.ts` | `tests/specs/core-workspace.spec.ts` |
+| [workspace-management](workspace-management.md) | Fluxo de workspaces multi-projeto com manifesto canonico e diagnostico local por agente | `ui/src/components/workspace/`, `src/api/routes/workspace.ts` | — |
 | [app-repository-registry](app-repository-registry.md) | Registro oficial de repositorios locais por app e plano de migracao | `src/core/app-registry.ts`, `src/core/app-artifacts.ts`, `src/core/app-migration.ts` | — |
-| [skills-catalog](skills-catalog.md) | Hub operacional de skills entre nuvem e workspaces | `ui/src/pages/SkillsPage.tsx`, `src/core/skills-hub.ts` | `tests/core/skills-hub.test.ts` |
+| [skills-catalog](skills-catalog.md) | Hub operacional de conteudos entre nuvem e workspaces | `ui/src/pages/SkillsPage.tsx`, `src/core/skills-hub.ts` | `tests/core/skills-hub.test.ts` |
 | [core-sync](core-sync.md) | Sync engine | `src/core/sync.ts` | `tests/specs/core-sync.spec.ts` |
 | [core-cache](core-cache.md) | Cache com TTL | `src/core/cache.ts` | `tests/specs/core-cache.spec.ts` |
-| [storage-provider](storage-provider.md) | Storage factory + providers | `src/storage/` | — |
+| [storage-provider](storage-provider.md) | Storage factory + providers com layout tipado | `src/storage/` | `tests/core/storage-layout-migration.test.ts` |
 | [deploy-deployer](deploy-deployer.md) | Deploy factory + deployers | `src/deploy/` | — |
-| [api-rest](api-rest.md) | API HTTP REST com catalogo cloud-first e inventario por agente | `src/api/` | — |
+| [api-rest](api-rest.md) | API HTTP REST `content-first` com rules locais por workspace | `src/api/` | — |
 
 ## Convencoes
 

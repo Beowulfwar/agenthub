@@ -1,8 +1,9 @@
 import { Hash, BarChart3, FileText, HardDrive } from 'lucide-react';
-import { useSkillInfo } from '../../hooks/useSkills';
+import { useContentInfo } from '../../hooks/useSkills';
+import type { ContentRef } from '../../api/types';
 
 interface SkillInfoPanelProps {
-  name: string;
+  ref: ContentRef;
 }
 
 function formatBytes(bytes: number): string {
@@ -11,8 +12,8 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function SkillInfoPanel({ name }: SkillInfoPanelProps) {
-  const { data: info, isLoading } = useSkillInfo(name);
+export function SkillInfoPanel({ ref }: SkillInfoPanelProps) {
+  const { data: info, isLoading } = useContentInfo(ref);
 
   if (isLoading || !info) return null;
 

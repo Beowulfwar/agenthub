@@ -19,6 +19,7 @@ import { createSearchCommand } from './commands/search.js';
 import { createDeployCommand } from './commands/deploy.js';
 import { createSyncCommand } from './commands/sync.js';
 import { createMigrateCommand } from './commands/migrate.js';
+import { createMigrateLayoutCommand } from './commands/migrate-layout.js';
 import { createImportCommand } from './commands/import-cmd.js';
 import { createExportCommand } from './commands/export-cmd.js';
 import { createConfigCommand } from './commands/config-cmd.js';
@@ -55,6 +56,7 @@ export function createCli(): Command {
   program.addCommand(createDeployCommand());
   program.addCommand(createSyncCommand());
   program.addCommand(createMigrateCommand());
+  program.addCommand(createMigrateLayoutCommand());
   program.addCommand(createImportCommand());
   program.addCommand(createExportCommand());
   program.addCommand(createConfigCommand());

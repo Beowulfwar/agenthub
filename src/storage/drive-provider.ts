@@ -18,10 +18,12 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { URL } from 'node:url';
 
 import type {
+  ContentPackage,
+  ContentRef,
+  ContentType,
   DriveConfig,
   HealthCheckResult,
   SkillFile,
-  SkillPackage,
 } from '../core/types.js';
 import { ALL_MARKER_FILES } from '../core/types.js';
 import {
@@ -29,6 +31,7 @@ import {
   AuthenticationError,
   SkillNotFoundError,
 } from '../core/errors.js';
+import { formatContentRef, parseContentRef } from '../core/content-ref.js';
 import { parseSkill } from '../core/skill.js';
 import type { ListOptions, StorageProvider } from './provider.js';
 
@@ -56,6 +59,11 @@ const REDIRECT_PORT = 3000;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const TYPE_DIRS: Record<ContentType, string> = {
+  skill: 'skills',
+  prompt: 'prompts',
+  subagent: 'subagents',
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -138,6 +146,28 @@ export class DriveProvider implements StorageProvider {
     this.resolvedFolderId = created.data.id as string;
     console.log(`  Created Drive folder "${id}" (${this.resolvedFolderId})`);
     return this.resolvedFolderId;
+  }
+
+  private normalizeRef(refOrName: string | ContentRef): ContentRef {
+    const ref = typeof refOrName === 'string' ? parseContentRef(refOrName, 'skill') : refOrName;
+    return ref;
+  }
+
+  private async ensureTypeFolderId(type: ContentType): Promise<string> {
+    const rootId = await this.ensureFolderId();
+    const folderName = TYPE_DIRS[type];
+    const existing = await this.findFolder(folderName, rootId);
+    if (existing) return existing;
+    return this.createFolder(folderName, rootId);
+  }
+
+  private async detectFolderType(folderId: string): Promise<ContentType | null> {
+    const files = await this.listFilesRecursive(folderId);
+    const marker = files.find((file) => ALL_MARKER_FILES.includes(file.relativePath as typeof ALL_MARKER_FILES[number]))?.relativePath;
+    if (!marker) return null;
+    if (marker === 'PROMPT.md') return 'prompt';
+    if (marker === 'AGENT.md') return 'subagent';
+    return 'skill';
   }
 
   // ── lazy SDK initialisation ────────────────────────────────────────────
@@ -456,56 +486,104 @@ export class DriveProvider implements StorageProvider {
   }
 
   async list(options?: string | ListOptions): Promise<string[]> {
+    const refs = await this.listContentRefs(options);
+    return refs.map((ref) => formatContentRef(ref));
+  }
+
+  async listContentRefs(options?: string | ListOptions): Promise<ContentRef[]> {
     const opts = typeof options === 'string' ? { query: options } : (options ?? {});
     const drive = await this.ensureClient();
-    const parentId = await this.ensureFolderId();
+    const rootId = await this.ensureFolderId();
+    const refs = new Map<string, ContentRef>();
 
-    const q =
-      `'${driveEscape(parentId)}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`;
+    for (const type of Object.keys(TYPE_DIRS) as ContentType[]) {
+      const typeRootId = await this.findFolder(TYPE_DIRS[type], rootId);
+      if (!typeRootId) continue;
 
-    const names: string[] = [];
-    let pageToken: string | undefined;
+      let pageToken: string | undefined;
+      do {
+        const res = await drive.files.list({
+          q: `'${driveEscape(typeRootId)}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`,
+          fields: 'nextPageToken, files(name)',
+          pageSize: 200,
+          pageToken,
+        });
 
+        for (const file of res.data.files ?? []) {
+          const ref = { type, name: file.name as string } satisfies ContentRef;
+          refs.set(formatContentRef(ref), ref);
+        }
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken);
+    }
+
+    let legacyPageToken: string | undefined;
     do {
       const res = await drive.files.list({
-        q,
-        fields: 'nextPageToken, files(name)',
+        q: `'${driveEscape(rootId)}' in parents and mimeType='${FOLDER_MIME}' and trashed=false`,
+        fields: 'nextPageToken, files(id, name)',
         pageSize: 200,
-        pageToken,
+        pageToken: legacyPageToken,
       });
 
       for (const file of res.data.files ?? []) {
-        names.push(file.name as string);
+        const folderName = file.name as string;
+        if ((Object.values(TYPE_DIRS) as string[]).includes(folderName)) continue;
+        const folderId = file.id as string;
+        const detectedType = await this.detectFolderType(folderId);
+        if (!detectedType) continue;
+        const ref = { type: detectedType, name: folderName } satisfies ContentRef;
+        refs.set(formatContentRef(ref), ref);
       }
 
-      pageToken = res.data.nextPageToken ?? undefined;
-    } while (pageToken);
+      legacyPageToken = res.data.nextPageToken ?? undefined;
+    } while (legacyPageToken);
 
-    const sorted = names.sort();
-
+    let results = [...refs.values()].sort((a, b) => {
+      if (a.type !== b.type) return a.type.localeCompare(b.type);
+      return a.name.localeCompare(b.name);
+    });
+    if (opts.type) {
+      results = results.filter((ref) => ref.type === opts.type);
+    }
     if (opts.query) {
       const lower = opts.query.toLowerCase();
-      return sorted.filter((n) => n.toLowerCase().includes(lower));
+      results = results.filter((ref) =>
+        formatContentRef(ref).toLowerCase().includes(lower) || ref.name.toLowerCase().includes(lower),
+      );
     }
 
-    // Note: type filtering for Drive is not efficient (would require
-    // fetching each folder's contents). Drive folders are returned as-is;
-    // type filtering is handled at the caller level when needed.
-
-    return sorted;
+    return results;
   }
 
-  async exists(name: string): Promise<boolean> {
-    const parentId = await this.ensureFolderId();
-    const id = await this.findFolder(name, parentId);
-    return id !== null;
+  async exists(refOrName: string | ContentRef): Promise<boolean> {
+    const ref = this.normalizeRef(refOrName);
+    const typeRootId = await this.findFolder(TYPE_DIRS[ref.type], await this.ensureFolderId());
+    if (typeRootId) {
+      const folderId = await this.findFolder(ref.name, typeRootId);
+      if (folderId) return true;
+    }
+
+    const legacyFolderId = await this.findFolder(ref.name, await this.ensureFolderId());
+    if (!legacyFolderId) return false;
+    const detectedType = await this.detectFolderType(legacyFolderId);
+    return detectedType === ref.type;
   }
 
-  async get(name: string): Promise<SkillPackage> {
-    const parentId = await this.ensureFolderId();
-    const folderId = await this.findFolder(name, parentId);
+  async get(refOrName: string | ContentRef): Promise<ContentPackage> {
+    const ref = this.normalizeRef(refOrName);
+    const rootId = await this.ensureFolderId();
+    const typeRootId = await this.findFolder(TYPE_DIRS[ref.type], rootId);
+    const typedFolderId = typeRootId ? await this.findFolder(ref.name, typeRootId) : null;
+    const folderId = typedFolderId ?? await this.findFolder(ref.name, rootId);
+
     if (!folderId) {
-      throw new SkillNotFoundError(name);
+      throw new SkillNotFoundError(formatContentRef(ref));
+    }
+
+    const detectedType = await this.detectFolderType(folderId);
+    if (!detectedType || detectedType !== ref.type) {
+      throw new SkillNotFoundError(formatContentRef(ref));
     }
 
     const files = await this.listFilesRecursive(folderId);
@@ -516,26 +594,29 @@ export class DriveProvider implements StorageProvider {
     );
 
     if (!skillMdFile) {
-      throw new SkillNotFoundError(name);
+      throw new SkillNotFoundError(formatContentRef(ref));
     }
 
     const skill = parseSkill(skillMdFile.content as string);
     // Use folder name as skill name if frontmatter name is empty.
     if (!skill.name) {
-      skill.name = name;
+      skill.name = ref.name;
+    }
+    if (!skill.type) {
+      skill.type = ref.type;
     }
 
     return { skill, files };
   }
 
-  async put(pkg: SkillPackage): Promise<void> {
-    const skillName = pkg.skill.name;
-    const parentId = await this.ensureFolderId();
+  async put(pkg: ContentPackage): Promise<void> {
+    const ref = this.normalizeRef({ type: pkg.skill.type ?? 'skill', name: pkg.skill.name });
+    const parentId = await this.ensureTypeFolderId(ref.type);
 
     // Find or create the skill folder.
-    let skillFolderId = await this.findFolder(skillName, parentId);
+    let skillFolderId = await this.findFolder(ref.name, parentId);
     if (!skillFolderId) {
-      skillFolderId = await this.createFolder(skillName, parentId);
+      skillFolderId = await this.createFolder(ref.name, parentId);
     }
 
     // Upload every file, creating sub-folders as needed.
@@ -566,11 +647,19 @@ export class DriveProvider implements StorageProvider {
     }
   }
 
-  async delete(name: string): Promise<void> {
-    const parentId = await this.ensureFolderId();
-    const folderId = await this.findFolder(name, parentId);
+  async delete(refOrName: string | ContentRef): Promise<void> {
+    const ref = this.normalizeRef(refOrName);
+    const rootId = await this.ensureFolderId();
+    const typeRootId = await this.findFolder(TYPE_DIRS[ref.type], rootId);
+    let folderId = typeRootId ? await this.findFolder(ref.name, typeRootId) : null;
     if (!folderId) {
-      throw new SkillNotFoundError(name);
+      const legacyId = await this.findFolder(ref.name, rootId);
+      if (legacyId && (await this.detectFolderType(legacyId)) === ref.type) {
+        folderId = legacyId;
+      }
+    }
+    if (!folderId) {
+      throw new SkillNotFoundError(formatContentRef(ref));
     }
 
     const drive = await this.ensureClient();
@@ -581,10 +670,10 @@ export class DriveProvider implements StorageProvider {
     });
   }
 
-  async *exportAll(): AsyncIterable<SkillPackage> {
-    const names = await this.list();
-    for (const name of names) {
-      yield await this.get(name);
+  async *exportAll(): AsyncIterable<ContentPackage> {
+    const refs = await this.listContentRefs();
+    for (const ref of refs) {
+      yield await this.get(ref);
     }
   }
 }

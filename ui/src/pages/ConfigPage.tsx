@@ -7,10 +7,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { clearCache } from '../api/client';
 import { ProviderStatus } from '../components/config/ProviderStatus';
 import { LoadingSpinner } from '../components/shared/LoadingSpinner';
+import { GitHubProviderCard } from '../components/providers/GitHubProviderCard';
+import { useProviders } from '../hooks/useProviders';
 
 export function ConfigPage() {
   const { data: config, isLoading } = useConfig();
   const health = useHealth();
+  const providers = useProviders();
   const setConfig = useSetConfig();
   const qc = useQueryClient();
 
@@ -62,6 +65,8 @@ export function ConfigPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       {/* Provider status */}
       {health.data && <ProviderStatus health={health.data} />}
+
+      {providers.data && <GitHubProviderCard providers={providers.data} />}
 
       {/* Current config */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">

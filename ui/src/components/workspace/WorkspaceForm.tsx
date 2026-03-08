@@ -5,10 +5,11 @@ import { useSaveWorkspace } from '../../hooks/useWorkspace';
 import { TargetSelector } from '../deploy/TargetSelector';
 import { HoverHint } from '../shared/HoverHint';
 import type {
+  ContentType,
   DeployTarget,
   DeployTargetDirectory,
   WorkspaceManifest,
-  WorkspaceSkillEntry,
+  WorkspaceContentEntry,
 } from '../../api/types';
 
 interface WorkspaceFormProps {
@@ -34,8 +35,9 @@ export function WorkspaceForm({
   const [name, setName] = useState(manifest.name ?? '');
   const [description, setDescription] = useState(manifest.description ?? '');
   const [defaultTargets, setDefaultTargets] = useState<DeployTarget[]>(manifest.defaultTargets ?? ['claude-code']);
-  const [skills, setSkills] = useState<WorkspaceSkillEntry[]>(manifest.skills ?? []);
-  const [newSkillName, setNewSkillName] = useState('');
+  const [contents, setContents] = useState<WorkspaceContentEntry[]>(manifest.contents ?? manifest.skills ?? []);
+  const [newContentName, setNewContentName] = useState('');
+  const [newContentType, setNewContentType] = useState<ContentType>('skill');
   const saveMutation = useSaveWorkspace();
 
   // Sync form when manifest prop changes (e.g. workspace switch)
@@ -43,16 +45,16 @@ export function WorkspaceForm({
     setName(manifest.name ?? '');
     setDescription(manifest.description ?? '');
     setDefaultTargets(manifest.defaultTargets ?? ['claude-code']);
-    setSkills(manifest.skills ?? []);
+    setContents(manifest.contents ?? manifest.skills ?? []);
   }, [manifest]);
 
   const handleSave = useCallback(() => {
     const updated: WorkspaceManifest = {
-      version: 1,
+      version: 2,
       ...(name.trim() && { name: name.trim() }),
       ...(description.trim() && { description: description.trim() }),
       defaultTargets,
-      skills: skills.length > 0 ? skills : undefined,
+      contents: contents.length > 0 ? contents : undefined,
       // Preserve groups from original manifest (form doesn't edit groups yet)
       ...(manifest.groups && { groups: manifest.groups }),
       ...(manifest.profile && { profile: manifest.profile }),
@@ -65,7 +67,7 @@ export function WorkspaceForm({
         onError: (err) => toast.error(err instanceof Error ? err.message : 'Nao foi possivel salvar o workspace'),
       },
     );
-  }, [name, description, defaultTargets, skills, manifest.groups, manifest.profile, filePath, saveMutation]);
+  }, [name, description, defaultTargets, contents, manifest.groups, manifest.profile, filePath, saveMutation]);
 
   // Ctrl+S shortcut
   useEffect(() => {
@@ -79,23 +81,24 @@ export function WorkspaceForm({
     return () => window.removeEventListener('keydown', handler);
   }, [handleSave]);
 
-  const addSkill = () => {
-    const trimmed = newSkillName.trim();
+  const addContent = () => {
+    const trimmed = newContentName.trim();
     if (!trimmed) return;
-    if (skills.some((s) => s.name === trimmed)) {
-      toast.error(`A skill "${trimmed}" ja esta na lista`);
+    if (contents.some((entry) => entry.name === trimmed && entry.type === newContentType)) {
+      toast.error(`O conteudo "${newContentType}/${trimmed}" ja esta na lista`);
       return;
     }
-    setSkills([...skills, { name: trimmed }]);
-    setNewSkillName('');
+    setContents([...contents, { type: newContentType, name: trimmed }]);
+    setNewContentName('');
+    setNewContentType('skill');
   };
 
-  const removeSkill = (index: number) => {
-    setSkills(skills.filter((_, i) => i !== index));
+  const removeContent = (index: number) => {
+    setContents(contents.filter((_, i) => i !== index));
   };
 
-  const updateSkillTargets = (index: number, targets: DeployTarget[]) => {
-    const updated = [...skills];
+  const updateContentTargets = (index: number, targets: DeployTarget[]) => {
+    const updated = [...contents];
     if (targets.length > 0) {
       updated[index] = { ...updated[index]!, targets };
     } else {
@@ -103,7 +106,7 @@ export function WorkspaceForm({
       const { targets: _, ...rest } = updated[index]!;
       updated[index] = rest;
     }
-    setSkills(updated);
+    setContents(updated);
   };
 
   return (
@@ -147,7 +150,7 @@ export function WorkspaceForm({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Skills e prompts usados neste projeto"
+              placeholder="Conteudos usados neste projeto"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
             />
           </div>
@@ -180,7 +183,7 @@ export function WorkspaceForm({
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.rootPath}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-gray-700">Pasta de skills</p>
+                  <p className="font-medium text-gray-700">Pasta de skills</p>
                     <p className="break-all font-mono text-[11px] text-gray-500">{directory.directories.skill}</p>
                   </div>
                   <div>
@@ -207,9 +210,9 @@ export function WorkspaceForm({
             selected={defaultTargets}
             onChange={setDefaultTargets}
             label="Agentes padrao deste workspace"
-            description="Escolha para quais aplicativos as skills deste workspace devem ser enviadas por padrao."
+            description="Escolha para quais aplicativos os conteudos deste workspace devem ser enviados por padrao."
             labelAddon={
-              <HoverHint text="Se uma skill nao tiver destino proprio, ela usara estes agentes como padrao." />
+              <HoverHint text="Se um conteudo nao tiver destino proprio, ele usara estes agentes como padrao." />
             }
           />
         </div>
@@ -219,33 +222,33 @@ export function WorkspaceForm({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-gray-700">
-              Skills deste workspace ({skills.length})
+              Conteudos deste workspace ({contents.length})
             </h3>
-            <HoverHint text="Somente as skills listadas aqui entram no sync deste workspace. Se a lista estiver vazia, o projeto continua valido e pode receber skills depois." />
+            <HoverHint text="Somente os conteudos listados aqui entram no sync deste workspace. Se a lista estiver vazia, o projeto continua valido e pode receber conteudos depois." />
           </div>
           <span className="text-xs text-gray-400">Ctrl+S para salvar</span>
         </div>
 
-        {skills.length > 0 && (
+        {contents.length > 0 && (
           <div className="mt-3 divide-y divide-gray-100">
-            {skills.map((skill, i) => (
-              <div key={skill.name} className="flex items-center gap-3 py-3 first:pt-0">
+            {contents.map((content, i) => (
+              <div key={`${content.type}/${content.name}`} className="flex items-center gap-3 py-3 first:pt-0">
                 <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium text-gray-900">
-                  {skill.name}
+                  {content.type}/{content.name}
                 </span>
                 <div className="flex flex-shrink-0 gap-1">
                   {(['claude-code', 'codex', 'cursor'] as DeployTarget[]).map((t) => {
-                    const active = skill.targets?.includes(t) ?? false;
-                    const isDefault = !skill.targets && defaultTargets.includes(t);
+                    const active = content.targets?.includes(t) ?? false;
+                    const isDefault = !content.targets && defaultTargets.includes(t);
                     return (
                       <button
                         key={t}
                         onClick={() => {
-                          const current = skill.targets ?? [...defaultTargets];
+                          const current = content.targets ?? [...defaultTargets];
                           const next = current.includes(t)
                             ? current.filter((x) => x !== t)
                             : [...current, t];
-                          updateSkillTargets(i, next);
+                          updateContentTargets(i, next);
                         }}
                         className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                           active || isDefault
@@ -264,9 +267,9 @@ export function WorkspaceForm({
                   })}
                 </div>
                 <button
-                  onClick={() => removeSkill(i)}
+                  onClick={() => removeContent(i)}
                   className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
-                  title="Remove skill"
+                  title="Remove conteudo"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -276,21 +279,30 @@ export function WorkspaceForm({
         )}
 
         <div className="mt-3 flex gap-2">
+          <select
+            value={newContentType}
+            onChange={(event) => setNewContentType(event.target.value as ContentType)}
+            className="w-36 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+          >
+            <option value="skill">skill</option>
+            <option value="prompt">prompt</option>
+            <option value="subagent">subagent</option>
+          </select>
           <input
             type="text"
-            value={newSkillName}
-            onChange={(e) => setNewSkillName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addSkill()}
-            placeholder="skill-name"
+            value={newContentName}
+            onChange={(e) => setNewContentName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addContent()}
+            placeholder="content-name"
             className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm text-gray-900 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
           />
           <button
-            onClick={addSkill}
-            disabled={!newSkillName.trim()}
+            onClick={addContent}
+            disabled={!newContentName.trim()}
             className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
-            Add
+            Adicionar
           </button>
         </div>
       </div>
@@ -315,7 +327,7 @@ export function WorkspaceForm({
                   ))}
                 </div>
                 <p className="mt-1 font-mono text-xs text-gray-500">
-                  {group.skills.join(', ')}
+                  {(group.contents?.map((entry) => `${entry.type}/${entry.name}`) ?? group.skills ?? []).join(', ')}
                 </p>
               </div>
             ))}

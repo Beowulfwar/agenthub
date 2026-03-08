@@ -5,6 +5,8 @@ import {
   SkillNotFoundError,
   SkillValidationError,
   AuthenticationError,
+  SecretStoreError,
+  ConflictError,
   MigrationError,
 } from '../../src/core/errors.js';
 
@@ -118,6 +120,30 @@ describe('Error hierarchy', () => {
     it('stores the message', () => {
       const err = new AuthenticationError('credentials expired');
       expect(err.message).toBe('credentials expired');
+    });
+  });
+
+  describe('SecretStoreError', () => {
+    it('is an instance of AhubError', () => {
+      const err = new SecretStoreError('keychain unavailable');
+      expect(err).toBeInstanceOf(AhubError);
+    });
+
+    it('has name "SecretStoreError"', () => {
+      const err = new SecretStoreError('boom');
+      expect(err.name).toBe('SecretStoreError');
+    });
+  });
+
+  describe('ConflictError', () => {
+    it('is an instance of AhubError', () => {
+      const err = new ConflictError('remote file changed');
+      expect(err).toBeInstanceOf(AhubError);
+    });
+
+    it('has name "ConflictError"', () => {
+      const err = new ConflictError('remote file changed');
+      expect(err.name).toBe('ConflictError');
     });
   });
 

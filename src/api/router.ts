@@ -15,6 +15,7 @@ import { sourcesRoutes } from './routes/sources.js';
 import { explorerRoutes } from './routes/explorer.js';
 import { appsRoutes } from './routes/apps.js';
 import { migrationsRoutes } from './routes/migrations.js';
+import { providersRoutes } from './routes/providers.js';
 
 /**
  * Create the Hono app with all API routes mounted.
@@ -28,6 +29,7 @@ export function createApiApp(): Hono {
   // Mount route modules.
   app.route('/api/health', healthRoutes());
   app.route('/api/skills', skillsRoutes());
+  app.route('/api/content', skillsRoutes());
   app.route('/api/config', configRoutes());
   app.route('/api/cache', cacheRoutes());
   app.route('/api/workspace', workspaceRoutes());
@@ -37,6 +39,7 @@ export function createApiApp(): Hono {
   app.route('/api/explorer', explorerRoutes());
   app.route('/api/apps', appsRoutes());
   app.route('/api/migrations', migrationsRoutes());
+  app.route('/api/providers', providersRoutes());
 
   return app;
 }
